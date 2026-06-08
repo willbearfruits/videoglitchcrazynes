@@ -2,11 +2,14 @@
 from __future__ import annotations
 import json
 import os
+import time
 import cv2
 
 RENDER_DIR = os.path.expanduser("~/Videos/glitch-renders")
 import numpy as np
 from PySide6 import QtWidgets, QtCore, QtGui
+
+from glitchcore.chain import Chain
 
 from glitchcore import presets, blend as blendmod
 from glitchcore import audio as A
@@ -93,12 +96,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.live_audio_env = None
         self._prev_env = None
         self._layer_count = 0
+        self.settings = QtCore.QSettings("crazyglitch", "editor")
+        self._recent = list(self.settings.value("recent", []) or [])
+        self._last_dir = self.settings.value("last_dir", "") or ""
+        self._undo, self._redo = [], []
+        self._last_snap = 0.0
+        self._all_sources = []        # every VideoSource ever made (released on close)
 
         self._build_ui()
         self._timers()
         self._style()
         self._install_shortcuts()
         self.setAcceptDrops(True)        # drag videos / audio onto the window
+        self._build_menubar()
+        self._restore_settings()
+        self._update_undo_actions()
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
@@ -175,6 +187,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._lock_widgets.append(wdg)
 
         split = QtWidgets.QSplitter()
+        self._split = split
         outer.addWidget(split, 1)
 
         # ---- left: preview + transport ----
@@ -305,9 +318,9 @@ class MainWindow(QtWidgets.QMainWindow):
             ("G", lambda: self.golive_btn.toggle()),
             ("M", lambda: self.mute_cb.toggle()),
             ("N", self.open_node_editor),
-            ("Ctrl+S", self.save_project),
-            ("Ctrl+O", self.load_project),
+            ("Delete", self._delete_selected_layer),
         ]
+        # Ctrl+S / Ctrl+O / Ctrl+Z / Ctrl+Shift+Z live on the menu actions
         for seq, slot in binds:
             QtGui.QShortcut(QtGui.QKeySequence(seq), self, activated=slot)
         self.play_btn.setToolTip("Space")
@@ -357,6 +370,226 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._add_video_from_path(p)      # drop a clip -> video layer
         e.acceptProposedAction()
 
+    # ----------------------------------------------------------- menu bar
+    def _build_menubar(self):
+        mb = self.menuBar()
+        fm = mb.addMenu("File")
+        fm.addAction("Open Video…", self.add_video_layer)
+        fm.addAction("Import Audio…", self.import_audio)
+        fm.addAction("Add Granular Layer…", self.add_granular_layer)
+        fm.addSeparator()
+        a_o = fm.addAction("Open Project…", self.load_project); a_o.setShortcut("Ctrl+O")
+        a_s = fm.addAction("Save Project…", self.save_project); a_s.setShortcut("Ctrl+S")
+        self._recent_menu = fm.addMenu("Open Recent")
+        fm.addSeparator()
+        a_q = fm.addAction("Quit", self.close); a_q.setShortcut("Ctrl+Q")
+        em = mb.addMenu("Edit")
+        self._undo_act = em.addAction("Undo", self.undo); self._undo_act.setShortcut("Ctrl+Z")
+        self._redo_act = em.addAction("Redo", self.redo); self._redo_act.setShortcut("Ctrl+Shift+Z")
+        hm = mb.addMenu("Help")
+        hm.addAction("Keyboard Shortcuts", self._show_shortcuts)
+        hm.addAction("About", self._about)
+        self._rebuild_recent_menu()
+
+    def _rebuild_recent_menu(self):
+        self._recent_menu.clear()
+        if not self._recent:
+            a = self._recent_menu.addAction("(none)")
+            a.setEnabled(False)
+            return
+        for p in self._recent:
+            self._recent_menu.addAction(p.rsplit("/", 1)[-1],
+                                        (lambda pp: lambda: self._open_recent(pp))(p))
+        self._recent_menu.addSeparator()
+        self._recent_menu.addAction("Clear list", self._clear_recent)
+
+    def _add_recent(self, path):
+        if path in self._recent:
+            self._recent.remove(path)
+        self._recent.insert(0, path)
+        self._recent = self._recent[:8]
+        self._last_dir = os.path.dirname(path)
+        self._rebuild_recent_menu()
+
+    def _clear_recent(self):
+        self._recent = []
+        self._rebuild_recent_menu()
+
+    def _open_recent(self, path):
+        if not os.path.exists(path):
+            QtWidgets.QMessageBox.warning(self, "Open Recent", f"File missing:\n{path}")
+            return
+        ext = os.path.splitext(path)[1].lower()
+        if ext == ".json":
+            self._load_project_path(path)
+        elif ext in {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".opus"}:
+            self._import_audio_path(path)
+        else:
+            self._add_video_from_path(path)
+
+    def _show_shortcuts(self):
+        QtWidgets.QMessageBox.information(self, "Keyboard shortcuts",
+            "Space\tplay / pause\n,  .\tseek ±1s\nHome\tto start\n"
+            "R\trender\nB\tlobotomize\nG\tgo live\nM\tmute\nN\tnode graph\n"
+            "Ctrl+Z / Ctrl+Shift+Z\tundo / redo\n"
+            "Ctrl+S / Ctrl+O\tsave / open project\n"
+            "Delete\tremove selected layer\n"
+            "Drag & drop\tvideo → layer, audio → soundtrack")
+
+    def _about(self):
+        QtWidgets.QMessageBox.about(self, "About",
+            "<b>CRAZY VIDEO GLITCH EDITOR</b><br><br>"
+            "Lobotomy / anti-art video glitch editor.<br>"
+            "Layers · granular synthesis · GPU shaders · node graph · "
+            "live performance.")
+
+    # ----------------------------------------------------------- settings
+    def _restore_settings(self):
+        s = self.settings
+        g = s.value("geometry")
+        if g is not None:
+            self.restoreGeometry(g)
+        ss = s.value("splitter")
+        if ss is not None:
+            self._split.restoreState(ss)
+        v = s.value("volume")
+        if v is not None:
+            self.vol.setValue(int(v))
+        for combo, key in ((self.aout_cb, "aout"), (self.fmt_cb, "fmt"),
+                           (self.res_cb, "res")):
+            val = s.value(key)
+            if val:
+                i = combo.findText(val)
+                if i >= 0:
+                    combo.setCurrentIndex(i)
+
+    def _save_settings(self):
+        s = self.settings
+        s.setValue("geometry", self.saveGeometry())
+        s.setValue("splitter", self._split.saveState())
+        s.setValue("volume", self.vol.value())
+        s.setValue("aout", self.aout_cb.currentText())
+        s.setValue("fmt", self.fmt_cb.currentText())
+        s.setValue("res", self.res_cb.currentText())
+        s.setValue("recent", self._recent)
+        s.setValue("last_dir", self._last_dir)
+
+    # ----------------------------------------------------------- undo / redo
+    def _snapshot(self):
+        snap = []
+        for l in self.timeline.layers:
+            snap.append((l, {
+                "enabled": l.enabled, "opacity": l.opacity, "blend": l.blend,
+                "start": l.start, "trim_in": l.trim_in, "duration": l.duration,
+                "chain": l.chain.to_dict(),
+                "warp": l.warp.to_dict() if l.warp else None,
+                "gran": l.granulator.to_dict() if l.is_granular else None}))
+        return snap
+
+    def _restore(self, snap):
+        self.timeline.layers = [l for l, _ in snap]
+        for l, st in snap:
+            l.enabled = st["enabled"]; l.opacity = st["opacity"]; l.blend = st["blend"]
+            l.start = st["start"]; l.trim_in = st["trim_in"]; l.duration = st["duration"]
+            l.chain = Chain().load(st["chain"])
+            l.warp = TimeWarp().load(st["warp"]) if st["warp"] else None
+            if l.is_granular and st["gran"]:
+                l.granulator.load(st["gran"])
+        self.selected = None
+        self._reprepare_and_audio()
+        self._rebuild_warps()
+        self._refresh_layer_list()
+        has = bool(self.timeline.layers)
+        self.play_btn.setEnabled(has)
+        self.render_btn.setEnabled(has)
+
+    def _push_undo(self, coalesce=False):
+        now = time.monotonic()
+        if coalesce and (now - self._last_snap) < 0.6:
+            return
+        self._last_snap = now
+        self._undo.append(self._snapshot())
+        if len(self._undo) > 40:
+            self._undo.pop(0)
+        self._redo.clear()
+        self._update_undo_actions()
+
+    def undo(self):
+        if not self._undo:
+            return
+        self._redo.append(self._snapshot())
+        self._restore(self._undo.pop())
+        self._update_undo_actions()
+
+    def redo(self):
+        if not self._redo:
+            return
+        self._undo.append(self._snapshot())
+        self._restore(self._redo.pop())
+        self._update_undo_actions()
+
+    def _update_undo_actions(self):
+        if hasattr(self, "_undo_act"):
+            self._undo_act.setEnabled(bool(self._undo))
+            self._redo_act.setEnabled(bool(self._redo))
+
+    # ----------------------------------------------- layer context / rename
+    def _layer_context_menu(self, pos):
+        if self.selected is None:
+            return
+        m = QtWidgets.QMenu(self)
+        m.addAction("Rename…", self._rename_selected)
+        m.addAction("Duplicate", self._duplicate_selected)
+        m.addSeparator()
+        m.addAction("Remove", self._remove_layer)
+        m.exec(self.layer_list.mapToGlobal(pos))
+
+    def _rename_selected(self):
+        l = self.selected
+        if l is None:
+            return
+        name, ok = QtWidgets.QInputDialog.getText(self, "Rename layer", "Name:", text=l.name)
+        if ok and name.strip():
+            l.name = name.strip()
+            self._refresh_layer_list(select=l)
+
+    def _duplicate_selected(self):
+        l = self.selected
+        if l is None:
+            return
+        self._push_undo()
+        self._layer_count += 1
+        if l.is_granular:
+            g = Granulator(seed=l.granulator.seed)
+            g.set_video(l.granulator.frames, l.granulator.fps)
+            g.v = dict(l.granulator.v)
+            nl = Layer(f"{l.name} copy", granulator=g)
+            nl._au = getattr(l, "_au", (None, 22050))
+            nl._gpath = getattr(l, "_gpath", None)
+        else:
+            try:
+                src = VideoSource(l.source.path)
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Duplicate", str(e))
+                return
+            self._all_sources.append(src)
+            nl = Layer(f"{l.name} copy", source=src)
+        nl.enabled, nl.opacity, nl.blend = l.enabled, l.opacity, l.blend
+        nl.start, nl.trim_in, nl.duration = l.start, l.trim_in, l.duration
+        nl.chain = Chain().load(l.chain.to_dict())
+        if l.warp:
+            nl.warp = TimeWarp().load(l.warp.to_dict())
+        self.timeline.layers.insert(self.timeline.layers.index(l) + 1, nl)
+        self._reprepare_granular()
+        self._rebuild_warps()
+        self._refresh_layer_list(select=nl)
+        self._rebuild_audio()
+        self._composite_now()
+
+    def _delete_selected_layer(self):
+        if self.selected is not None and self.layer_list.hasFocus():
+            self._remove_layer()
+
     def _refresh_presets(self):
         cur = self.preset_cb.currentText()
         self.preset_cb.blockSignals(True)
@@ -377,6 +610,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.layer_list = QtWidgets.QListWidget()
         self.layer_list.setMaximumHeight(120)
         self.layer_list.currentRowChanged.connect(self._row_selected)
+        self.layer_list.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        self.layer_list.customContextMenuRequested.connect(self._layer_context_menu)
+        self.layer_list.itemDoubleClicked.connect(lambda *_: self._rename_selected())
         v.addWidget(self.layer_list)
         self._lock_widgets.append(self.layer_list)
         btns = QtWidgets.QHBoxLayout()
@@ -617,11 +853,14 @@ class MainWindow(QtWidgets.QMainWindow):
     # ----------------------------------------------------------- add layers
     def _pick_video(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Pick a video", "", "Video (*.mp4 *.mov *.mkv *.avi *.webm *.gif);;All (*)")
+            self, "Pick a video", self._last_dir,
+            "Video (*.mp4 *.mov *.mkv *.avi *.webm *.gif);;All (*)")
         return path
 
     def _add_source_layer(self, src, kind, detect_path=None):
         """Common path for video/webcam/screen layers."""
+        self._push_undo()
+        self._all_sources.append(src)        # released on close, not on remove
         self._layer_count += 1
         layer = Layer(f"{kind} {self._layer_count}", source=src)
         first_video = not any(not l.is_granular for l in self.timeline.layers)
@@ -656,6 +895,7 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Error", str(e))
             return
+        self._add_recent(path)
         self._add_source_layer(src, "video", detect_path=path)
 
     def add_webcam_layer(self):
@@ -691,6 +931,8 @@ class MainWindow(QtWidgets.QMainWindow):
             gsrc.release()
             QtWidgets.QMessageBox.critical(self, "Error", "No frames decoded.")
             return
+        self._push_undo()
+        self._add_recent(path)
         self._layer_count += 1
         g = Granulator(seed=4242 + self._layer_count)
         g.set_video(frames, gsrc.fps)
@@ -734,12 +976,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def import_audio(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Import soundtrack", "",
+            self, "Import soundtrack", self._last_dir,
             "Audio/Video (*.mp3 *.wav *.flac *.ogg *.m4a *.aac *.mp4 *.mov *.mkv);;All (*)")
         if path:
             self._import_audio_path(path)
 
     def _import_audio_path(self, path):
+        self._add_recent(path)
         self.audio_track = path
         self.status.showMessage("Analyzing audio…")
         self._audio_worker = AudioImportWorker(path)
@@ -852,6 +1095,7 @@ class MainWindow(QtWidgets.QMainWindow):
         l = self.selected
         if l is None:
             return
+        self._push_undo(coalesce=True)
         l.enabled = self.p_enabled.isChecked()
         l.blend = self.p_blend.currentText()
         l.opacity = self.p_opacity.value() / 100.0
@@ -872,6 +1116,7 @@ class MainWindow(QtWidgets.QMainWindow):
         l = self.selected
         if l is None:
             return
+        self._push_undo()
         # list is reversed, so visual up = later in composite order
         i = self.timeline.layers.index(l)
         j = max(0, min(len(self.timeline.layers) - 1, i - delta))
@@ -883,8 +1128,9 @@ class MainWindow(QtWidgets.QMainWindow):
         l = self.selected
         if l is None:
             return
-        if l.source:
-            l.source.release()
+        self._push_undo()
+        # NB: don't release the source here — undo may restore this layer;
+        # all sources are released on close via self._all_sources
         self.timeline.layers.remove(l)
         self.selected = None
         self._refresh_layer_list()
@@ -907,11 +1153,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _add_card(self, eff):
         card = EffectCard(eff)
-        card.changed.connect(self._composite_now)
+        card.changed.connect(self._on_fx_changed)
         card.remove_me.connect(self._remove_effect)
         card.move_me.connect(self._move_effect)
         self.cards.append(card)
         self.stack_lay.addWidget(card)
+
+    def _on_fx_changed(self):
+        self._push_undo(coalesce=True)
+        self._composite_now()
 
     def _rebuild_gran_tab(self):
         while self.gran_lay.count():
@@ -925,12 +1175,17 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.tabs.setTabEnabled(1, True)
         panel = GranularPanel(self.selected.granulator)
-        panel.changed.connect(lambda: self._gran_timer.start(40))
+        panel.changed.connect(self._on_gran_changed)
         self.gran_lay.addWidget(panel)
+
+    def _on_gran_changed(self):
+        self._push_undo(coalesce=True)
+        self._gran_timer.start(40)
 
     def add_effect(self):
         if self.selected is None:
             return
+        self._push_undo()
         eff = fx.REGISTRY[self.add_cb.currentData()]()
         self.selected.chain.add(eff)
         self._add_card(eff)
@@ -938,12 +1193,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _remove_effect(self, eff):
         if self.selected:
+            self._push_undo()
             self.selected.chain.remove(eff)
             self._rebuild_fx_tab()
             self._composite_now()
 
     def _move_effect(self, eff, delta):
         if self.selected:
+            self._push_undo()
             self.selected.chain.move(eff, delta)
             self._rebuild_fx_tab()
             self._composite_now()
@@ -1032,6 +1289,7 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(self, "No layer", "Select a layer first.")
             return
         name = self.preset_cb.currentText()
+        self._push_undo()
         if name in presets.PRESETS:
             self.selected.chain = presets.build(name, seed=self.selected.chain.seed)
             if name in presets.WANTS_DATAMOSH:
@@ -1039,6 +1297,7 @@ class MainWindow(QtWidgets.QMainWindow):
         elif name in presets.list_user():
             self.selected.chain = presets.load_user(name)
         else:
+            self._undo.pop()                 # nothing happened; drop the snapshot
             return
         self._rebuild_fx_tab()
         self._composite_now()
@@ -1061,6 +1320,7 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(
                 self, "Lobotomize", "Select a video layer first.")
             return
+        self._push_undo()
         cd = l.source.duration if l.source else self.timeline.duration()
         do_lobotomize(l, self.beats, content_dur=cd,
                       duration=self.timeline.duration(), seed=l.chain.seed)
@@ -1220,7 +1480,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def save_project(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save project", "glitch.json", "Project (*.json)")
+            self, "Save project", os.path.join(self._last_dir, "glitch.json"),
+            "Project (*.json)")
         if not path:
             return
         data = {"fps": self.timeline.fps,
@@ -1229,13 +1490,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 "layers": [l.to_dict() for l in self.timeline.layers]}
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
+        self._add_recent(path)
         self.status.showMessage(f"Saved {path}")
 
     def load_project(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Open project", "", "Project (*.json)")
-        if not path:
-            return
+            self, "Open project", self._last_dir, "Project (*.json)")
+        if path:
+            self._load_project_path(path)
+
+    def _load_project_path(self, path):
+        self._add_recent(path)
         try:
             with open(path) as f:
                 data = json.load(f)
@@ -1268,6 +1533,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         skipped.append(ld.get("name", "?"))
                         continue
                     src = VideoSource(p)
+                    self._all_sources.append(src)
                     layer = Layer(ld.get("name", "video"), source=src)
                 layer.enabled = ld.get("enabled", True)
                 layer.opacity = ld.get("opacity", 1.0)
@@ -1295,6 +1561,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status.showMessage(f"Loaded {path}")
 
     def closeEvent(self, e):
+        self._save_settings()
         self.audio_player.stop()
         if self.live_cam is not None:
             self.live_cam.close()
@@ -1303,7 +1570,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.input_hub is not None:
             self.input_hub.stop()
             self.input_hub.wait(500)
-        for l in self.timeline.layers:
-            if l.source:
+        for src in self._all_sources:        # incl. removed/undo-able layers
+            try:
+                src.release()
+            except Exception:
+                pass
+        for l in self.timeline.layers:       # granular gsrc already released
+            if l.source and l.source not in self._all_sources:
                 l.source.release()
         super().closeEvent(e)
