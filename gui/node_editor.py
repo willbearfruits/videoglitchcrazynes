@@ -149,14 +149,15 @@ class NodeEditor(QtWidgets.QMainWindow):
 
     def _build_default(self):
         out = OutputNode("out")
-        out.x, out.y = 700, 120
+        out.x, out.y = 410, 110           # keep it inside the visible view
         self._add_item(out)
         self.graph.output_id = "out"
         # seed a source from the first available layer
         layer = next((l for l in self.main.timeline.layers), None)
         if layer is not None:
-            self._make_source(layer, 60, 120)
+            self._make_source(layer, 40, 110)
         self._redraw_edges()
+        self.view.centerOn(280, 150)
 
     def _make_source(self, layer, x, y):
         nid = self.graph.new_id("src")

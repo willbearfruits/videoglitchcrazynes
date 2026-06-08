@@ -201,17 +201,25 @@ class MainWindow(QtWidgets.QMainWindow):
         self.mute_cb.setChecked(True)
         tr.addWidget(self.mute_cb)
         self.aout_cb = QtWidgets.QComboBox()
-        self.aout_cb.setToolTip("Preview audio output device")
-        self.aout_cb.setMaximumWidth(180)
+        self.aout_cb.setToolTip("Preview audio output device. 'System (PipeWire)' "
+                                "follows your desktop's default sink (incl. USB interfaces).")
+        self.aout_cb.setMaximumWidth(190)
+        import shutil
+        has_pw = bool(shutil.which("paplay"))
+        if has_pw:
+            self.aout_cb.addItem("🔊 System (PipeWire)", "pw")
         self.aout_cb.addItem("default out", None)
         try:
             import sounddevice as sd
             for i, d in enumerate(sd.query_devices()):
                 if d["max_output_channels"] > 0:
-                    self.aout_cb.addItem(d["name"][:26], i)
+                    self.aout_cb.addItem("· " + d["name"][:24], i)
         except Exception:
             pass
         self.aout_cb.currentIndexChanged.connect(self._set_audio_out)
+        if has_pw:                              # default to the system sink (USB/F4 etc.)
+            self.aout_cb.setCurrentIndex(0)
+            self.audio_player.set_device("pw")
         tr.addWidget(self.aout_cb)
         self.time_lbl = QtWidgets.QLabel("0.0 / 0.0s")
         tr.addWidget(self.time_lbl)

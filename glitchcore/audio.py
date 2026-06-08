@@ -122,14 +122,17 @@ class AudioPlayer:
         self.buf = None
         self.sr = 22050
         self._ok = True
-        self.device = None          # output device index (None = system default)
+        self.device = None          # int = sounddevice idx; "pw" = PipeWire/Pulse; None = default
         self._orig = None           # (samples, sr_in) before device resample
+        self._pw = None             # paplay subprocess (PipeWire mode)
         try:
             import sounddevice  # noqa: F401
         except Exception:
             self._ok = False
 
     def _device_sr(self):
+        if self.device == "pw":
+            return 48000            # PipeWire resamples; pick a sane rate
         try:
             import sounddevice as sd
             return int(sd.query_devices(self.device, "output")["default_samplerate"])
@@ -161,18 +164,58 @@ class AudioPlayer:
         self.sr = sr
 
     def play_from(self, t: float):
-        if not self._ok or self.buf is None:
+        if self.buf is None:
+            return
+        i = max(0, int(t * self.sr))
+        if i >= len(self.buf):
+            return
+        if self.device == "pw":
+            self._play_pw(self.buf[i:])
+            return
+        if not self._ok:
             return
         try:
             import sounddevice as sd
-            i = max(0, int(t * self.sr))
             sd.stop()
-            if i < len(self.buf):
-                sd.play(self.buf[i:], self.sr, device=self.device)
+            sd.play(self.buf[i:], self.sr, device=self.device)
         except Exception:
             self._ok = False
 
+    def _play_pw(self, tail):
+        """Stream to the PipeWire/Pulse default sink via paplay (a writer thread
+        feeds stdin so the GUI thread doesn't block on the pipe)."""
+        import subprocess
+        import threading
+        self._stop_pw()
+        data = np.ascontiguousarray(tail, dtype=np.float32).tobytes()
+        try:
+            self._pw = subprocess.Popen(
+                ["paplay", "--raw", f"--rate={self.sr}", "--channels=1",
+                 "--format=float32le"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            self._pw = None
+            return
+
+        def _feed(proc, payload):
+            try:
+                proc.stdin.write(payload)
+                proc.stdin.close()
+            except Exception:
+                pass
+        threading.Thread(target=_feed, args=(self._pw, data), daemon=True).start()
+
+    def _stop_pw(self):
+        if self._pw is not None:
+            try:
+                self._pw.terminate()
+            except Exception:
+                pass
+            self._pw = None
+
     def stop(self):
+        self._stop_pw()
         if not self._ok:
             return
         try:
