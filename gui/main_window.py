@@ -37,6 +37,39 @@ def bgr_to_pixmap(bgr) -> QtGui.QPixmap:
     return QtGui.QPixmap.fromImage(img.copy())
 
 
+class PreviewView(QtWidgets.QWidget):
+    """Paints the current frame scaled-to-fit (aspect preserved), centered —
+    always fills the pane regardless of layout timing."""
+
+    def __init__(self, placeholder=""):
+        super().__init__()
+        self._pm = None
+        self._placeholder = placeholder
+        self.setMinimumSize(320, 200)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                           QtWidgets.QSizePolicy.Policy.Expanding)
+
+    def set_pixmap(self, pm):
+        self._pm = pm
+        self.update()
+
+    def paintEvent(self, e):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.RenderHint.SmoothPixmapTransform)
+        p.fillRect(self.rect(), QtGui.QColor("#050507"))
+        if self._pm is None:
+            p.setPen(QtGui.QColor("#5a5a72"))
+            p.drawText(self.rect(), QtCore.Qt.AlignmentFlag.AlignCenter, self._placeholder)
+        else:
+            sz = self._pm.size().scaled(self.size(),
+                                        QtCore.Qt.AspectRatioMode.KeepAspectRatio)
+            x = (self.width() - sz.width()) // 2
+            y = (self.height() - sz.height()) // 2
+            p.drawPixmap(QtCore.QRect(x, y, sz.width(), sz.height()), self._pm)
+        p.setPen(QtGui.QPen(QtGui.QColor("#1d3a44")))
+        p.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 8, 8)
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -63,6 +96,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._build_ui()
         self._timers()
         self._style()
+        self._install_shortcuts()
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
@@ -81,6 +115,8 @@ class MainWindow(QtWidgets.QMainWindow):
         b_cam.clicked.connect(self.add_webcam_layer)
         b_scr = QtWidgets.QPushButton("➕ Screen")
         b_scr.clicked.connect(self.add_screen_layer)
+        for b in (b_vid, b_gran, b_cam, b_scr):
+            b.setObjectName("addBtn")
         tb.addWidget(b_vid)
         tb.addWidget(b_gran)
         tb.addWidget(b_cam)
@@ -97,6 +133,7 @@ class MainWindow(QtWidgets.QMainWindow):
         b_savefx.clicked.connect(self.save_fx)
         tb.addWidget(b_savefx)
         b_lobo = QtWidgets.QPushButton("🧠 Lobotomize")
+        b_lobo.setObjectName("loboBtn")
         b_lobo.setToolTip("Auto-generate a beat-synced time-warp + glitch chain "
                           "on the selected video layer")
         b_lobo.clicked.connect(self.lobotomize_selected)
@@ -136,13 +173,10 @@ class MainWindow(QtWidgets.QMainWindow):
         left = QtWidgets.QWidget()
         lv = QtWidgets.QVBoxLayout(left)
         lv.setContentsMargins(0, 0, 0, 0)
-        self.preview = QtWidgets.QLabel(
+        self.preview = PreviewView(
             "Add a Video Layer to start.\n\n"
             "➕ Video Layer = a clip   ·   ➕ Granular Layer = frame-grain cloud\n"
             "Stack layers, set blend modes, add effects, hit RENDER.")
-        self.preview.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.preview.setMinimumSize(PREVIEW_W, 338)
-        self.preview.setStyleSheet("background:#000; color:#777; border:1px solid #222;")
         lv.addWidget(self.preview, 1)
         self.timebar = BeatBar()
         self.timebar.seek.connect(self.seek_fraction)
@@ -202,17 +236,62 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tabs.addTab(live_scroll, "Live")
         rv.addWidget(self.tabs, 1)
         rv.addWidget(self._render_box())
+        right.setMinimumWidth(330)
+        right.setMaximumWidth(440)
         split.addWidget(right)
-        split.setSizes([680, 640])
+        # preview gets the lion's share; the control panel stays narrow
+        split.setStretchFactor(0, 1)
+        split.setStretchFactor(1, 0)
+        split.setSizes([1060, 360])
 
         self._lock_widgets += [self.tabs, self.play_btn, self.scrub]
         self._refresh_presets()
         self.status = self.statusBar()
-        self.status.showMessage("Ready. Add a Video Layer.")
+        self.status.showMessage(
+            "Ready — add a layer.   ⌨  Space play · , . seek · R render · "
+            "B lobotomize · G live · M mute · N node graph")
 
     def _set_editing_enabled(self, on):
         for w in self._lock_widgets:
             w.setEnabled(on)
+
+    # ----------------------------------------------------------- shortcuts
+    def _install_shortcuts(self):
+        # Space is handled via an app event filter so a focused button can't
+        # eat it (but a focused spin/line edit still types normally).
+        QtWidgets.QApplication.instance().installEventFilter(self)
+        binds = [
+            ("Home", lambda: self.seek_fraction(0.0)),
+            (",", lambda: self._seek_by(-1.0)),
+            (".", lambda: self._seek_by(1.0)),
+            ("R", self.do_render),
+            ("B", self.lobotomize_selected),       # B = brain (lobotomize)
+            ("G", lambda: self.golive_btn.toggle()),
+            ("M", lambda: self.mute_cb.toggle()),
+            ("N", self.open_node_editor),
+            ("Ctrl+S", self.save_project),
+            ("Ctrl+O", self.load_project),
+        ]
+        for seq, slot in binds:
+            QtGui.QShortcut(QtGui.QKeySequence(seq), self, activated=slot)
+        self.play_btn.setToolTip("Space")
+
+    def eventFilter(self, obj, event):
+        if event.type() == QtCore.QEvent.Type.KeyPress and \
+                event.key() == QtCore.Qt.Key.Key_Space and \
+                not event.isAutoRepeat():
+            fw = QtWidgets.QApplication.focusWidget()
+            editing = isinstance(fw, (QtWidgets.QAbstractSpinBox, QtWidgets.QLineEdit))
+            if not editing and QtWidgets.QApplication.activeModalWidget() is None \
+                    and self.timeline.layers:
+                self.toggle_play()
+                return True
+        return super().eventFilter(obj, event)
+
+    def _seek_by(self, dt):
+        dur = self.timeline.duration()
+        if dur > 0:
+            self.seek_fraction(max(0.0, min(1.0, (self.t + dt) / dur)))
 
     def _refresh_presets(self):
         cur = self.preset_cb.currentText()
@@ -309,6 +388,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.progress = QtWidgets.QProgressBar()
         g.addWidget(self.progress, 2, 0, 1, 2)
         self.render_btn = QtWidgets.QPushButton("⚡ RENDER")
+        self.render_btn.setObjectName("renderBtn")
         self.render_btn.clicked.connect(self.do_render)
         self.render_btn.setEnabled(False)
         g.addWidget(self.render_btn, 2, 2)
@@ -338,6 +418,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.live_res_cb.setCurrentText("1280x720")
         g.addWidget(self.live_res_cb, 1, 1)
         self.golive_btn = QtWidgets.QPushButton("🔴 Go Live  →  virtual cam")
+        self.golive_btn.setObjectName("liveBtn")
         self.golive_btn.setCheckable(True)
         self.golive_btn.setToolTip("Stream the live composite to a virtual webcam "
                                    "(OBS/Zoom/browser) + react to live audio in")
@@ -364,38 +445,110 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _style(self):
         self.setStyleSheet("""
-            QMainWindow, QWidget { background:#1e1e1e; color:#ddd; font-size:12px; }
-            QPushButton { background:#2d2d2d; border:1px solid #3a3a3a;
-                padding:5px 9px; border-radius:4px; }
-            QPushButton:hover { background:#383838; }
-            QPushButton:disabled { color:#666; }
-            #EffectCard { background:#262626; border:1px solid #383838;
-                border-radius:6px; }
-            QComboBox, QSpinBox, QDoubleSpinBox { background:#2d2d2d;
-                border:1px solid #3a3a3a; padding:3px; border-radius:3px; }
-            QGroupBox { border:1px solid #383838; border-radius:6px;
-                margin-top:8px; padding-top:8px; }
-            QGroupBox::title { subcontrol-origin:margin; left:8px; }
-            QTabWidget::pane { border:1px solid #383838; }
-            QTabBar::tab { background:#262626; padding:5px 12px; }
-            QTabBar::tab:selected { background:#383838; }
-            QListWidget { background:#262626; border:1px solid #383838; }
-            QProgressBar { background:#2d2d2d; border:1px solid #3a3a3a;
-                border-radius:3px; text-align:center; }
-            QProgressBar::chunk { background:#00e5ff; }
-            QSlider::groove:horizontal { height:4px; background:#3a3a3a; border-radius:2px; }
-            QSlider::handle:horizontal { background:#00e5ff; width:12px;
-                margin:-5px 0; border-radius:6px; }
+            QMainWindow { background:qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                stop:0 #0f0f17, stop:1 #08080c); }
+            QWidget { background:transparent; color:#e6e6f2; font-size:12px; }
+            QToolTip { background:#12121c; color:#bfefff; border:1px solid #00e5ff;
+                padding:4px 6px; }
+            QLabel { color:#b8b8cc; }
+
+            QGroupBox { background:#13131c; border:1px solid #25253a;
+                border-radius:9px; margin-top:13px; padding:10px 8px 8px 8px; }
+            QGroupBox::title { subcontrol-origin:margin; left:11px; padding:0 6px;
+                color:#00e5ff; font-family:"DejaVu Sans Mono",monospace;
+                font-weight:bold; letter-spacing:1px; }
+
+            QPushButton { background:#1b1b28; color:#dfe6f0; border:1px solid #2e2e46;
+                padding:6px 11px; border-radius:6px; }
+            QPushButton:hover { background:#26263c; border:1px solid #00e5ff; color:#fff; }
+            QPushButton:pressed { background:#0e0e16; }
+            QPushButton:disabled { color:#54546a; border-color:#1e1e2c; background:#15151f; }
+            QPushButton:checked { background:#262640; border:1px solid #00e5ff; }
+
+            QPushButton#addBtn { border-color:#1c4a56; color:#bfeaff; }
+            QPushButton#addBtn:hover { border:1px solid #00e5ff; background:#0c2a32; }
+            QPushButton#renderBtn { border:none; color:#04161c; font-weight:bold;
+                font-family:"DejaVu Sans Mono",monospace; letter-spacing:1px;
+                background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #38f0ff, stop:1 #00a8c8); }
+            QPushButton#renderBtn:hover { background:#5cf6ff; }
+            QPushButton#renderBtn:disabled { background:#16161f; color:#54546a; }
+            QPushButton#loboBtn { border:none; color:#fff; font-weight:bold;
+                background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #a855f7, stop:1 #ff2d7e); }
+            QPushButton#loboBtn:hover { border:1px solid #fff; }
+            QPushButton#liveBtn { border:1px solid #ff2d55; color:#ff96aa; }
+            QPushButton#liveBtn:checked { border:none; color:#fff;
+                background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ff3360, stop:1 #b81038); }
+
+            QComboBox, QSpinBox, QDoubleSpinBox { background:#14141e;
+                border:1px solid #2a2a40; padding:4px 6px; border-radius:5px;
+                selection-background-color:#00e5ff; selection-color:#04161c; }
+            QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover { border:1px solid #3a6a78; }
+            QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border:1px solid #00e5ff; }
+            QComboBox::drop-down { border:none; width:18px; }
+            QComboBox QAbstractItemView { background:#14141e; border:1px solid #2a2a40;
+                color:#dfe6f0; selection-background-color:#00313c; outline:none; }
+
+            QTabWidget::pane { border:1px solid #25253a; border-radius:7px; top:-1px; }
+            QTabBar::tab { background:#13131c; color:#8a8aa4; padding:6px 16px;
+                margin-right:2px; border:1px solid #25253a; border-bottom:none;
+                border-top-left-radius:7px; border-top-right-radius:7px;
+                font-family:"DejaVu Sans Mono",monospace; }
+            QTabBar::tab:selected { background:#1c1c2a; color:#00e5ff;
+                border-bottom:2px solid #00e5ff; }
+            QTabBar::tab:hover { color:#dfe6f0; }
+
+            QListWidget { background:#10101a; border:1px solid #25253a;
+                border-radius:7px; padding:3px; }
+            QListWidget::item { padding:5px 7px; border-radius:5px; }
+            QListWidget::item:selected { background:#00313c; color:#7df2ff; }
+            QListWidget::item:hover { background:#1a1a2a; }
+
+            QCheckBox { color:#c8c8da; spacing:6px; }
+            QCheckBox::indicator { width:15px; height:15px; border:1px solid #3a3a52;
+                border-radius:4px; background:#14141e; }
+            QCheckBox::indicator:checked { background:#00e5ff; border:1px solid #00e5ff; }
+
+            QProgressBar { background:#10101a; border:1px solid #25253a;
+                border-radius:6px; text-align:center; color:#cfefff; height:17px; }
+            QProgressBar::chunk { border-radius:5px;
+                background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #00e5ff, stop:1 #ff2d7e); }
+
+            QSlider::groove:horizontal { height:5px; background:#20202e; border-radius:3px; }
+            QSlider::sub-page:horizontal { background:#0a7286; border-radius:3px; }
+            QSlider::handle:horizontal { background:#00e5ff; width:14px; height:14px;
+                margin:-5px 0; border-radius:8px; border:2px solid #073640; }
+            QSlider::handle:horizontal:hover { background:#62f4ff; }
+
+            QScrollBar:vertical { background:transparent; width:11px; margin:0; }
+            QScrollBar::handle:vertical { background:#2c2c44; border-radius:5px; min-height:26px; }
+            QScrollBar::handle:vertical:hover { background:#00e5ff; }
+            QScrollBar:horizontal { background:transparent; height:11px; }
+            QScrollBar::handle:horizontal { background:#2c2c44; border-radius:5px; min-width:26px; }
+            QScrollBar::handle:horizontal:hover { background:#00e5ff; }
+            QScrollBar::add-line, QScrollBar::sub-line { width:0; height:0; }
+            QScrollBar::add-page, QScrollBar::sub-page { background:transparent; }
+
+            #EffectCard { background:#181822; border:1px solid #2a2a40; border-radius:9px; }
+
+            QToolButton { color:#8a8aa4; border:none; padding:2px; background:transparent; }
+            QToolButton:hover { color:#00e5ff; }
+
+            QSplitter::handle { background:#16161f; }
+            QSplitter::handle:hover { background:#00e5ff; }
+
+            QStatusBar { background:#0a0a10; color:#7df2ff; border-top:1px solid #163842;
+                font-family:"DejaVu Sans Mono",monospace; }
         """)
 
     # --------------------------------------------------------- canvas size
     def _canvas(self):
-        w = PREVIEW_W
-        if self.timeline.width:
-            h = int(w * self.timeline.height / self.timeline.width)
-        else:
-            h = 338
-        return w, max(1, h)
+        """Composite resolution: ~900px on the long side at the source aspect.
+        The pixmap is then scaled to fill the preview pane on display, so the
+        video always fits the window regardless of layout timing."""
+        w = self.timeline.width or 854
+        h = self.timeline.height or 480
+        scale = 900.0 / max(w, h)
+        return max(1, int(round(w * scale))), max(1, int(round(h * scale)))
 
     # ----------------------------------------------------------- add layers
     def _pick_video(self):
@@ -821,6 +974,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 l.warp.build(self.beats, dur, cd)
 
     # ------------------------------------------------------------- preview
+    def _show_frame(self, frame):
+        self.preview.set_pixmap(bgr_to_pixmap(frame))
+
     def _composite_now(self):
         if not self.timeline.layers:
             return
@@ -828,7 +984,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         w, h = self._canvas()
         frame = self.timeline.render_frame(self.t, w, h, self.clock, audio=self.audio_env)
-        self.preview.setPixmap(bgr_to_pixmap(frame))
+        self._show_frame(frame)
         self._update_time()
 
     def toggle_play(self):
@@ -859,12 +1015,11 @@ class MainWindow(QtWidgets.QMainWindow):
             frame = self.timeline.render_frame(self.t, self.live_cam.w, self.live_cam.h,
                                                self.clock, audio=self.audio_env)
             self.live_cam.send(frame)
-            pw, ph = self._canvas()
-            self.preview.setPixmap(bgr_to_pixmap(cv2.resize(frame, (pw, ph))))
+            self._show_frame(frame)
         else:
             w, h = self._canvas()
             frame = self.timeline.render_frame(self.t, w, h, self.clock, audio=self.audio_env)
-            self.preview.setPixmap(bgr_to_pixmap(frame))
+            self._show_frame(frame)
         self._update_time()
 
     def seek_fraction(self, f):

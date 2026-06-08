@@ -182,7 +182,9 @@ class EffectCard(QtWidgets.QFrame):
 
     def _sync_enabled(self):
         self.body.setEnabled(self.eff.enabled)
-        self.setStyleSheet("" if self.eff.enabled else "#EffectCard{opacity:0.5;}")
+        self.setStyleSheet(
+            "" if self.eff.enabled
+            else "#EffectCard{background:#101016;border:1px solid #1e1e2a;}")
 
     def _set_mode(self, m):
         self.eff.beat_mode = m
