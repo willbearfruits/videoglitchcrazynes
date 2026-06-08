@@ -21,6 +21,12 @@ python3 main.py in.mp4 out.mp4 --preset brainfuck [--datamosh] [--speed 1.5] [--
   **v4l2loopback** (virtual cam); GPU shaders need a working GL context.
 - Deps are in `requirements.txt` (`pip install -r requirements.txt`). `torch` is
   an optional extra (MiDaS depth only).
+- **`./install.sh`** installs a desktop launcher (app menu + `~/Desktop`). It
+  generates a `.desktop` pointing at the resolved `python3` and the repo dir —
+  `Exec` uses the **absolute** interpreter path because `.desktop` files don't
+  run a login shell (so a bare `python3` may not find the right env). Icon is
+  `assets/icon.png`; the generated `assets/crazyglitch.desktop` is gitignored
+  (machine-specific paths).
 - **There is no test suite.** Verify changes with a headless smoke test that
   drives the engine or constructs the GUI offscreen, e.g.:
   ```bash
