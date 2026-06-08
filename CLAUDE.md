@@ -75,6 +75,17 @@ of `Grain`s; `Granulator.render()` draws the frame cloud and
 `audio.granulate_audio()` synthesizes matching audio from the **same grains**, so
 picture and sound granulate in lockstep.
 
+**Audio in/out routing** (`audio.py`): the muxed render audio is separate from
+**preview** playback. `AudioPlayer` plays a numpy buffer and resamples it to the
+output device's rate (PortAudio doesn't resample). Its `device` can be a
+sounddevice index, `None` (default), or `"pw"` — the `"pw"` path shells out to
+`paplay --raw` so audio reaches **PipeWire** sinks (e.g. USB interfaces that
+PortAudio can't enumerate because PipeWire holds them). A separate soundtrack can
+be imported (`AudioImportWorker`, which works on audio-only files — it does *not*
+call `media.probe`, which requires a video stream). Audio source precedence for
+both preview and render mux: **imported track > granular layer audio > first
+video layer's audio**.
+
 **Rendering** (`renderer.py`): pipes processed frames to an ffmpeg subprocess
 (`media.open_frame_writer`), optionally runs the real datamosh pass
 (`datamosh.py` strips I-frames from an mpeg4 AVI — needs recurring I-frames, so
@@ -99,6 +110,29 @@ handles mp4/webm/gif + resolution scaling). `render()` is single-input;
 - **Performance** (`output.py VirtualCam` + `LiveAudioEnv`): "Go Live" streams the
   composite to a v4l2loopback virtual webcam while reacting to live audio-in.
 
+## GUI specifics worth knowing (`gui/main_window.py`)
+
+- **Undo/redo is snapshot-based**, not command-based. `_snapshot()` captures each
+  layer's editable state (props + `chain.to_dict()` + warp/gran dicts) while
+  **keeping live `Layer`/source object refs**; `_restore()` reassembles
+  `timeline.layers` from those refs. Mutating actions call `_push_undo()` first
+  (`coalesce=True` time-debounces rapid slider drags). Consequence:
+  `_remove_layer` must **not** release the layer's `VideoSource` (undo may restore
+  it) — every source is tracked in `self._all_sources` and released only in
+  `closeEvent`.
+- **Render-time UI lock:** `_set_editing_enabled(False)` disables `_lock_widgets`
+  during a render so the worker thread isn't racing live timeline edits.
+- **Preview always fits the pane:** the preview is a custom `PreviewView` that
+  paints the frame scaled-to-fit in `paintEvent` (composite res is fixed ~900px
+  via `_canvas()`, decoupled from display size).
+- **Space = play/pause** is handled by an app-level `eventFilter` (not a
+  `QShortcut`) so a focused button can't swallow it; it's skipped when an
+  editable widget has focus.
+- **Persistence:** window geometry, splitter, volume, output device, render
+  format/res, recent files, and last dir are saved via `QSettings("crazyglitch",
+  "editor")` in `closeEvent`. Drag-and-drop onto the window adds video files as
+  layers and audio files as the soundtrack.
+
 ## Gotchas
 
 - **Never `pkill -f main.py`** to stop the app — it matches other projects'
@@ -108,3 +142,11 @@ handles mp4/webm/gif + resolution scaling). `render()` is single-input;
   (workspace) repo — don't commit into it.
 - Presets/projects/user-FX are JSON via `to_dict()`/`load()` on every model
   object; when you add a serializable field, update both ends.
+- Headless GUI smoke tests that `start()` a QThread (`BeatWorker`,
+  `AudioImportWorker`, render workers) may print `QThread: Destroyed while thread
+  is still running` and `Aborted (core dumped)` at interpreter exit — that's a
+  test-teardown artifact (the printed results above it are valid), not an app
+  bug. `.wait()` the worker or ignore it.
+- Offscreen test runs write `QSettings` (geometry from a 0-size window); clear
+  `~/.config/crazyglitch` before launching the real GUI or it restores a bogus
+  window size.
