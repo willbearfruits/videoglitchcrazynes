@@ -125,10 +125,14 @@ class AudioPlayer:
         self.device = None          # int = sounddevice idx; "pw" = PipeWire/Pulse; None = default
         self._orig = None           # (samples, sr_in) before device resample
         self._pw = None             # paplay subprocess (PipeWire mode)
+        self.gain = 1.5             # preview volume (mono → sink often feels quiet)
         try:
             import sounddevice  # noqa: F401
         except Exception:
             self._ok = False
+
+    def set_gain(self, g):
+        self.gain = max(0.0, float(g))
 
     def _device_sr(self):
         if self.device == "pw":
@@ -169,15 +173,18 @@ class AudioPlayer:
         i = max(0, int(t * self.sr))
         if i >= len(self.buf):
             return
+        tail = self.buf[i:]
+        if self.gain != 1.0:
+            tail = np.clip(tail * self.gain, -1.0, 1.0).astype(np.float32)
         if self.device == "pw":
-            self._play_pw(self.buf[i:])
+            self._play_pw(tail)
             return
         if not self._ok:
             return
         try:
             import sounddevice as sd
             sd.stop()
-            sd.play(self.buf[i:], self.sr, device=self.device)
+            sd.play(tail, self.sr, device=self.device)
         except Exception:
             self._ok = False
 

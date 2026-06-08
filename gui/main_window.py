@@ -98,6 +98,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._timers()
         self._style()
         self._install_shortcuts()
+        self.setAcceptDrops(True)        # drag videos / audio onto the window
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
@@ -200,6 +201,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.mute_cb = QtWidgets.QCheckBox("🔊")
         self.mute_cb.setChecked(True)
         tr.addWidget(self.mute_cb)
+        self.vol = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.vol.setRange(0, 300)
+        self.vol.setValue(150)
+        self.vol.setFixedWidth(70)
+        self.vol.setToolTip("Preview volume")
+        self.vol.valueChanged.connect(self._set_volume)
+        tr.addWidget(self.vol)
         self.aout_cb = QtWidgets.QComboBox()
         self.aout_cb.setToolTip("Preview audio output device. 'System (PipeWire)' "
                                 "follows your desktop's default sink (incl. USB interfaces).")
@@ -325,6 +333,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self.audio_player.set_device(self.aout_cb.currentData())
         if self.timer.isActive() and self.mute_cb.isChecked():
             self.audio_player.play_from(self.t)        # restart on the new device
+
+    def _set_volume(self, v):
+        self.audio_player.set_gain(v / 100.0)
+        if self.timer.isActive() and self.mute_cb.isChecked():
+            self.audio_player.play_from(self.t)        # restart at the new level
+
+    # ----------------------------------------------------------- drag & drop
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
+
+    def dropEvent(self, e):
+        audio_exts = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".opus"}
+        for url in e.mimeData().urls():
+            p = url.toLocalFile()
+            if not p:
+                continue
+            ext = os.path.splitext(p)[1].lower()
+            if ext in audio_exts:
+                self._import_audio_path(p)        # drop a song -> soundtrack
+            else:
+                self._add_video_from_path(p)      # drop a clip -> video layer
+        e.acceptProposedAction()
 
     def _refresh_presets(self):
         cur = self.preset_cb.currentText()
@@ -616,8 +647,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def add_video_layer(self):
         path = self._pick_video()
-        if not path:
-            return
+        if path:
+            self._add_video_from_path(path)
+
+    def _add_video_from_path(self, path):
         try:
             src = VideoSource(path)
         except Exception as e:
@@ -703,8 +736,10 @@ class MainWindow(QtWidgets.QMainWindow):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, "Import soundtrack", "",
             "Audio/Video (*.mp3 *.wav *.flac *.ogg *.m4a *.aac *.mp4 *.mov *.mkv);;All (*)")
-        if not path:
-            return
+        if path:
+            self._import_audio_path(path)
+
+    def _import_audio_path(self, path):
         self.audio_track = path
         self.status.showMessage("Analyzing audio…")
         self._audio_worker = AudioImportWorker(path)
