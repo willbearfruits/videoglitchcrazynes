@@ -200,6 +200,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.mute_cb = QtWidgets.QCheckBox("🔊")
         self.mute_cb.setChecked(True)
         tr.addWidget(self.mute_cb)
+        self.aout_cb = QtWidgets.QComboBox()
+        self.aout_cb.setToolTip("Preview audio output device")
+        self.aout_cb.setMaximumWidth(180)
+        self.aout_cb.addItem("default out", None)
+        try:
+            import sounddevice as sd
+            for i, d in enumerate(sd.query_devices()):
+                if d["max_output_channels"] > 0:
+                    self.aout_cb.addItem(d["name"][:26], i)
+        except Exception:
+            pass
+        self.aout_cb.currentIndexChanged.connect(self._set_audio_out)
+        tr.addWidget(self.aout_cb)
         self.time_lbl = QtWidgets.QLabel("0.0 / 0.0s")
         tr.addWidget(self.time_lbl)
         lv.addLayout(tr)
@@ -299,6 +312,11 @@ class MainWindow(QtWidgets.QMainWindow):
         dur = self.timeline.duration()
         if dur > 0:
             self.seek_fraction(max(0.0, min(1.0, (self.t + dt) / dur)))
+
+    def _set_audio_out(self):
+        self.audio_player.set_device(self.aout_cb.currentData())
+        if self.timer.isActive() and self.mute_cb.isChecked():
+            self.audio_player.play_from(self.t)        # restart on the new device
 
     def _refresh_presets(self):
         cur = self.preset_cb.currentText()

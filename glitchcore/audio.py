@@ -122,28 +122,35 @@ class AudioPlayer:
         self.buf = None
         self.sr = 22050
         self._ok = True
-        self._dev_sr = None
+        self.device = None          # output device index (None = system default)
+        self._orig = None           # (samples, sr_in) before device resample
         try:
             import sounddevice  # noqa: F401
         except Exception:
             self._ok = False
 
     def _device_sr(self):
-        if self._dev_sr is None:
-            try:
-                import sounddevice as sd
-                self._dev_sr = int(sd.query_devices(None, "output")["default_samplerate"])
-            except Exception:
-                self._dev_sr = 48000
-        return self._dev_sr
+        try:
+            import sounddevice as sd
+            return int(sd.query_devices(self.device, "output")["default_samplerate"])
+        except Exception:
+            return 48000
+
+    def set_device(self, device):
+        self.device = device
+        self._prepare()             # re-resample for the new device's rate
 
     def set_buffer(self, samples, sr):
+        self._orig = None if samples is None else (samples, sr)
+        self._prepare()
+
+    def _prepare(self):
         # the output device may not accept the source rate (PortAudio doesn't
-        # resample) — resample once to the device's native rate so preview
-        # playback actually produces sound.
-        if samples is None:
+        # resample) — resample once to the device's native rate.
+        if self._orig is None:
             self.buf = None
             return
+        samples, sr = self._orig
         dsr = self._device_sr() if self._ok else sr
         if dsr and sr != dsr:
             n_out = max(1, int(round(len(samples) * dsr / sr)))
@@ -161,7 +168,7 @@ class AudioPlayer:
             i = max(0, int(t * self.sr))
             sd.stop()
             if i < len(self.buf):
-                sd.play(self.buf[i:], self.sr)
+                sd.play(self.buf[i:], self.sr, device=self.device)
         except Exception:
             self._ok = False
 
