@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+env/
+*.json
+!presets/*.json
+glitched*.mp4
+*.mov
+/tmp_render/
+.DS_Store
+
+# editor lock files
+.~lock.*#
