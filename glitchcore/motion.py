@@ -6,9 +6,11 @@ luminance pseudo-depth by default and optionally a real MiDaS model (torch) when
 one-time model download.
 """
 from __future__ import annotations
+import logging
 import numpy as np
 import cv2
 
+log = logging.getLogger(__name__)
 _dis = None
 _midas = None
 _midas_tf = None
@@ -57,7 +59,7 @@ def enable_midas():
         _midas_state = "ok"
         return True
     except Exception as e:  # pragma: no cover
-        print(f"[motion] MiDaS unavailable, using luminance depth: {e}")
+        log.warning("MiDaS unavailable, using luminance depth: %s", e)
         _midas_state = "failed"
         return False
 

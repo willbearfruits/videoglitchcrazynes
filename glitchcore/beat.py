@@ -1,6 +1,9 @@
 """Audio beat / onset detection via librosa."""
 from __future__ import annotations
+import logging
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 
 def detect_beats(audio_path: str, sr: int = 22050) -> dict:
@@ -20,7 +23,7 @@ def detect_beats(audio_path: str, sr: int = 22050) -> dict:
                 "onsets": np.asarray(onsets, float).tolist(),
                 "tempo": tempo}
     except Exception as e:  # pragma: no cover
-        print(f"[beat] detection failed: {e}")
+        log.warning("beat detection failed: %s", e)
         return {"beats": [], "onsets": [], "tempo": 0.0}
 
 

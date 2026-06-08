@@ -22,12 +22,18 @@ def run_cli(argv):
     ap.add_argument("--seed", type=int, default=1337)
     args = ap.parse_args(argv)
 
+    import os
+    import tempfile
     info = media.probe(args.input)
     beats = []
     if info.has_audio:
-        wav = "/tmp/_glitch_cli.wav"
-        if media.extract_audio(args.input, wav):
-            beats = beat.detect_beats(wav)["beats"]
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf:
+            wav = tf.name
+        try:
+            if media.extract_audio(args.input, wav):
+                beats = beat.detect_beats(wav)["beats"]
+        finally:
+            os.path.exists(wav) and os.remove(wav)
     if not beats:
         beats = beat.grid_beats(info.duration, 120.0)
 

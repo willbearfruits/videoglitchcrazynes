@@ -11,3 +11,5 @@ mss>=9.0           # screen capture source
 # gamepad also needs the user in the `input` group
 moderngl>=5.8     # GPU shader effects (Phase 2)
 pyvirtualcam>=0.10  # virtual cam output (Phase 4, needs v4l2loopback)
+# torch>=2.0       # OPTIONAL: enables real MiDaS depth in Depth Displace
+#                  #   (motion.enable_midas() downloads a ~80 MB model on first use)

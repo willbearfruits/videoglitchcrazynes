@@ -9,7 +9,9 @@ Each chunk:              fourCC(4) size(4) data(size) [pad to even]
 """
 from __future__ import annotations
 import struct
+import logging
 
+log = logging.getLogger(__name__)
 VOP_START = b"\x00\x00\x01\xb6"
 
 
@@ -69,8 +71,8 @@ def datamosh(in_avi: str, out_avi: str, keep_first: bool = True) -> bool:
 
         with open(out_avi, "wb") as f:
             f.write(new_file)
-        print(f"[datamosh] kept {kept} chunks, dropped {dropped} I-frames")
+        log.info("datamosh: kept %d chunks, dropped %d I-frames", kept, dropped)
         return True
     except Exception as e:  # pragma: no cover
-        print(f"[datamosh] failed: {e}")
+        log.warning("datamosh failed: %s", e)
         return False

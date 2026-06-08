@@ -1,8 +1,20 @@
 """Media helpers: probe, audio extract, and ffmpeg frame-pipe encode/mux."""
 from __future__ import annotations
 import json
+import functools
 import subprocess
 from dataclasses import dataclass
+
+
+@functools.lru_cache(maxsize=1)
+def has_nvenc() -> bool:
+    """True if this ffmpeg build advertises the h264_nvenc encoder."""
+    try:
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
+                             capture_output=True, text=True).stdout
+        return "h264_nvenc" in out
+    except Exception:
+        return False
 
 
 @dataclass
@@ -75,10 +87,10 @@ def open_frame_writer(out_path: str, w: int, h: int, fps: float,
         cmd = base + ["-c:v", "mpeg4", "-q:v", "5", "-g", str(gop),
                       "-bf", "0", "-sc_threshold", "1000000000",
                       "-mbd", "rd", out_path]
-    elif gpu:
+    elif gpu and has_nvenc():
         cmd = base + ["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21",
                       "-pix_fmt", "yuv420p", out_path]
-    else:
+    else:                                    # CPU fallback (no NVIDIA GPU)
         cmd = base + ["-c:v", "libx264", "-crf", "20",
                       "-pix_fmt", "yuv420p", out_path]
     return subprocess.Popen(cmd, stdin=subprocess.PIPE,
@@ -125,7 +137,7 @@ def finalize(video_in: str, audio_src: str | None, out_path: str,
             cmd += ["-c:a", "libopus", "-b:a", "160k"]
     else:  # mp4
         if reencode or scaling:
-            if gpu:
+            if gpu and has_nvenc():
                 cmd += ["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21"]
             else:
                 cmd += ["-c:v", "libx264", "-crf", "20"]

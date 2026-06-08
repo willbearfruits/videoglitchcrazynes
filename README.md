@@ -26,8 +26,12 @@ python3 main.py input.mp4 out.mp4 --preset brainfuck --datamosh --speed 1.5
 ```
 
 Requires `ffmpeg` + `ffprobe` on PATH and the packages in `requirements.txt`
-(PySide6, opencv, numpy, librosa, soundfile). On this machine they're already
-installed; encode uses `h264_nvenc` (GPU) when available.
+(`pip install -r requirements.txt`). Encode uses `h264_nvenc` (NVIDIA GPU) when
+available and falls back to `libx264` otherwise.
+
+Optional extras: `torch` enables real MiDaS depth in **Depth Displace**
+(`motion.enable_midas()` downloads a ~80 MB model on first use); live features
+need system **portaudio** (audio) and **v4l2loopback** (virtual cam).
 
 ## How to use the GUI
 

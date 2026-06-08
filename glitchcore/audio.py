@@ -1,9 +1,12 @@
 """Audio: load, granular synthesis sharing the frame grain schedule, and a
 simple non-blocking player for live preview (sounddevice)."""
 from __future__ import annotations
+import logging
 import numpy as np
 
 from . import media
+
+log = logging.getLogger(__name__)
 
 
 def load_audio(video_path: str, sr: int = 22050):
@@ -106,7 +109,7 @@ class AudioEnv:
 
             return cls(times, norm(rms), norm(bass), norm(mid), norm(high))
         except Exception as e:  # pragma: no cover
-            print(f"[audio] envelope analysis failed: {e}")
+            log.warning("envelope analysis failed: %s", e)
             return None
 
 

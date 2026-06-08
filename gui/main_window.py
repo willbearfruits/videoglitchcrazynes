@@ -66,6 +66,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
+        self._lock_widgets = []        # disabled while a render thread runs
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
         outer = QtWidgets.QVBoxLayout(central)
@@ -123,6 +124,10 @@ class MainWindow(QtWidgets.QMainWindow):
         tb.addWidget(b_save)
         tb.addWidget(b_load)
         outer.addLayout(tb)
+        for i in range(tb.count()):       # lock all toolbar controls during render
+            wdg = tb.itemAt(i).widget()
+            if isinstance(wdg, (QtWidgets.QPushButton, QtWidgets.QComboBox)):
+                self._lock_widgets.append(wdg)
 
         split = QtWidgets.QSplitter()
         outer.addWidget(split, 1)
@@ -200,9 +205,14 @@ class MainWindow(QtWidgets.QMainWindow):
         split.addWidget(right)
         split.setSizes([680, 640])
 
+        self._lock_widgets += [self.tabs, self.play_btn, self.scrub]
         self._refresh_presets()
         self.status = self.statusBar()
         self.status.showMessage("Ready. Add a Video Layer.")
+
+    def _set_editing_enabled(self, on):
+        for w in self._lock_widgets:
+            w.setEnabled(on)
 
     def _refresh_presets(self):
         cur = self.preset_cb.currentText()
@@ -225,6 +235,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.layer_list.setMaximumHeight(120)
         self.layer_list.currentRowChanged.connect(self._row_selected)
         v.addWidget(self.layer_list)
+        self._lock_widgets.append(self.layer_list)
         btns = QtWidgets.QHBoxLayout()
         for txt, slot in (("▲", lambda: self._move_layer(-1)),
                           ("▼", lambda: self._move_layer(1)),
@@ -232,6 +243,7 @@ class MainWindow(QtWidgets.QMainWindow):
             b = QtWidgets.QPushButton(txt)
             b.clicked.connect(slot)
             btns.addWidget(b)
+            self._lock_widgets.append(b)
         v.addLayout(btns)
 
         props = QtWidgets.QGridLayout()
@@ -878,7 +890,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.timeline.layers:
             return
         fmt = self.fmt_cb.currentText()
-        os.makedirs(RENDER_DIR, exist_ok=True)
         out, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "Render to", os.path.join(RENDER_DIR, f"glitched.{fmt}"),
             f"Video (*.{fmt})")
@@ -886,6 +897,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if not out.lower().endswith("." + fmt):
             out += "." + fmt
+        os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
         if self.timer.isActive():
             self.toggle_play()
         height = {"Source": 0, "1080p": 1080, "720p": 720, "480p": 480}[
@@ -913,6 +925,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.render_worker.finished_ok.connect(self._render_done)
         self.render_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
+        self._set_editing_enabled(False)   # lock layer/structure edits during render
         self.render_worker.start()
 
     def _render_progress(self, frac, msg):
@@ -922,6 +935,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _render_done(self, ok, msg):
         self.render_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
+        self._set_editing_enabled(True)
         self.progress.setValue(100 if ok else 0)
         if ok:
             self.status.showMessage(f"✓ {msg}")
@@ -961,39 +975,51 @@ class MainWindow(QtWidgets.QMainWindow):
             self, "Open project", "", "Project (*.json)")
         if not path:
             return
-        with open(path) as f:
-            data = json.load(f)
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Open project", f"Could not read project:\n{e}")
+            return
         from glitchcore.chain import Chain
         self.timeline = Timeline(fps=data.get("fps", 30.0))
         self.timeline.width = data.get("width", 0)
         self.timeline.height = data.get("height", 0)
         self.speed.setValue(data.get("speed", 1.0))
         self.datamosh_cb.setChecked(data.get("datamosh", False))
+        skipped = []
         for ld in data.get("layers", []):
-            if ld.get("is_granular"):
-                g = Granulator().load(ld.get("granulator", {}))
-                gp = ld.get("path") or ld.get("_gpath")
-                if gp:
-                    gs = VideoSource(gp)
-                    g.set_video(gs.preload(work_w=480), gs.fps)
-                    gs.release()
-                layer = Layer(ld.get("name", "granular"), granulator=g)
-                if gp:
-                    layer._au = A.load_audio(gp)
-                    layer._gpath = gp
-            else:
-                src = VideoSource(ld["path"])
-                layer = Layer(ld.get("name", "video"), source=src)
-            layer.enabled = ld.get("enabled", True)
-            layer.opacity = ld.get("opacity", 1.0)
-            layer.blend = ld.get("blend", "normal")
-            layer.start = ld.get("start", 0.0)
-            layer.trim_in = ld.get("trim_in", 0.0)
-            layer.duration = ld.get("duration")
-            layer.chain = Chain().load(ld.get("chain", {}))
-            if ld.get("warp"):
-                layer.warp = TimeWarp().load(ld["warp"])
-            self.timeline.layers.append(layer)
+            try:
+                if ld.get("is_granular"):
+                    g = Granulator().load(ld.get("granulator", {}))
+                    gp = ld.get("path") or ld.get("_gpath")
+                    if gp:
+                        gs = VideoSource(gp)
+                        g.set_video(gs.preload(work_w=480), gs.fps)
+                        gs.release()
+                    layer = Layer(ld.get("name", "granular"), granulator=g)
+                    if gp:
+                        layer._au = A.load_audio(gp)
+                        layer._gpath = gp
+                else:
+                    p = ld.get("path")
+                    if not p:
+                        skipped.append(ld.get("name", "?"))
+                        continue
+                    src = VideoSource(p)
+                    layer = Layer(ld.get("name", "video"), source=src)
+                layer.enabled = ld.get("enabled", True)
+                layer.opacity = ld.get("opacity", 1.0)
+                layer.blend = ld.get("blend", "normal")
+                layer.start = ld.get("start", 0.0)
+                layer.trim_in = ld.get("trim_in", 0.0)
+                layer.duration = ld.get("duration")
+                layer.chain = Chain().load(ld.get("chain", {}))
+                if ld.get("warp"):
+                    layer.warp = TimeWarp().load(ld["warp"])
+                self.timeline.layers.append(layer)
+            except Exception as e:               # skip a bad layer, keep loading
+                skipped.append(f"{ld.get('name', '?')} ({e})")
         vl = next((l for l in self.timeline.layers if not l.is_granular and l.source), None)
         if vl:
             self._detect_beats(vl.source.path)
@@ -1002,6 +1028,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_layer_list()
         self.play_btn.setEnabled(bool(self.timeline.layers))
         self.render_btn.setEnabled(bool(self.timeline.layers))
+        if skipped:
+            QtWidgets.QMessageBox.warning(
+                self, "Open project", "Skipped layers:\n- " + "\n- ".join(skipped))
         self.status.showMessage(f"Loaded {path}")
 
     def closeEvent(self, e):

@@ -62,12 +62,17 @@ class ScreenSource:
         self.n = int(duration * self.fps)
         self.path = "screen"
         self._local = threading.local()   # mss is per-thread
+        self._instances = []              # every per-thread mss, for cleanup
+        self._lock = threading.Lock()
         probe.close()
 
     def _sct(self):
         import mss
         if getattr(self._local, "inst", None) is None:
-            self._local.inst = mss.mss()
+            inst = mss.mss()
+            self._local.inst = inst
+            with self._lock:
+                self._instances.append(inst)
         return self._local.inst
 
     def frame_at_time(self, t):
@@ -85,11 +90,13 @@ class ScreenSource:
         return out
 
     def release(self):
-        try:
-            if getattr(self._local, "inst", None) is not None:
-                self._local.inst.close()
-        except Exception:
-            pass
+        with self._lock:
+            insts, self._instances = self._instances, []
+        for inst in insts:                # close mss contexts from every thread
+            try:
+                inst.close()
+            except Exception:
+                pass
 
 
 def find_webcam_index():

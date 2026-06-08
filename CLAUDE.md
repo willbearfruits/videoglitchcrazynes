@@ -19,7 +19,8 @@ python3 main.py in.mp4 out.mp4 --preset brainfuck [--datamosh] [--speed 1.5] [--
 - Requires **ffmpeg + ffprobe on PATH**. GPU encode uses `h264_nvenc` (falls
   back to libx264). Live features need system **portaudio** (sounddevice) and
   **v4l2loopback** (virtual cam); GPU shaders need a working GL context.
-- Deps are in `requirements.txt`; on the dev machine they're already installed.
+- Deps are in `requirements.txt` (`pip install -r requirements.txt`). `torch` is
+  an optional extra (MiDaS depth only).
 - **There is no test suite.** Verify changes with a headless smoke test that
   drives the engine or constructs the GUI offscreen, e.g.:
   ```bash

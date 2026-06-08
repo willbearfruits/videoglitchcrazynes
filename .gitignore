@@ -2,10 +2,18 @@ __pycache__/
 *.pyc
 .venv/
 env/
+
+# project / preset files are user data (keep bundled fx_presets if you add any)
 *.json
-!presets/*.json
-glitched*.mp4
+!fx_presets/*.json
+
+# render outputs
+*.mp4
 *.mov
+*.mkv
+*.webm
+*.avi
+*.gif
 /tmp_render/
 .DS_Store
 

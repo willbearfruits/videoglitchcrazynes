@@ -9,6 +9,8 @@ class VideoSource:
     def __init__(self, path: str, cache: int = 300):
         self.path = path
         self.cap = cv2.VideoCapture(path)
+        if not self.cap.isOpened():
+            raise ValueError(f"Could not open video: {path}")
         self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
         self.n = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
         self.w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))

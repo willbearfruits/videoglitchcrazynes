@@ -19,6 +19,10 @@ class InputHub(QtCore.QThread):
         self._run = True
         self.joy = None
         self.midi = None
+        # set on the main thread (mutating os.environ off-thread isn't safe);
+        # only force a headless SDL driver if there's genuinely no display
+        if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
     def stop(self):
         self._run = False
@@ -40,9 +44,6 @@ class InputHub(QtCore.QThread):
         self.status.emit("  ·  ".join(names))
 
     def run(self):
-        # only force a headless SDL driver if there's genuinely no display
-        if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-            os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
         pygame = None
         try:
             import pygame as _pg
