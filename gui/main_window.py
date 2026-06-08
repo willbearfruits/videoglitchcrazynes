@@ -1,7 +1,10 @@
 """CRAZY VIDEO GLITCH EDITOR — layered, timelined, granular, with live sound."""
 from __future__ import annotations
 import json
+import os
 import cv2
+
+RENDER_DIR = os.path.expanduser("~/Videos/glitch-renders")
 import numpy as np
 from PySide6 import QtWidgets, QtCore, QtGui
 
@@ -875,8 +878,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.timeline.layers:
             return
         fmt = self.fmt_cb.currentText()
+        os.makedirs(RENDER_DIR, exist_ok=True)
         out, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Render to", f"glitched.{fmt}", f"Video (*.{fmt})")
+            self, "Render to", os.path.join(RENDER_DIR, f"glitched.{fmt}"),
+            f"Video (*.{fmt})")
         if not out:
             return
         if not out.lower().endswith("." + fmt):
