@@ -52,6 +52,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.render_worker = None
         self.beat_worker = None
         self.input_hub = None
+        self.live_cam = None
+        self.live_audio_env = None
+        self._prev_env = None
         self._layer_count = 0
 
         self._build_ui()
@@ -105,6 +108,11 @@ class MainWindow(QtWidgets.QMainWindow):
         b_add.clicked.connect(self.add_effect)
         tb.addWidget(b_add)
         tb.addStretch(1)
+        b_node = QtWidgets.QPushButton("🕸 Node Graph")
+        b_node.setToolTip("Open the node-graph editor (sources → effects → "
+                          "blends → feedback loops → output)")
+        b_node.clicked.connect(self.open_node_editor)
+        tb.addWidget(b_node)
         b_save = QtWidgets.QPushButton("Save")
         b_save.clicked.connect(self.save_project)
         b_load = QtWidgets.QPushButton("Open Project")
@@ -171,13 +179,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gran_lay.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         self.gran_scroll.setWidget(self.gran_host)
         self.tabs.addTab(self.gran_scroll, "Granular")
-        # live tab
+        # live tab = performance (Go Live) + control mapping
         self.live_panel = LivePanel()
         self.live_panel.enable.toggled.connect(self._toggle_live)
         self.live_panel.applied.connect(self._on_live_applied)
+        live_container = QtWidgets.QWidget()
+        lc = QtWidgets.QVBoxLayout(live_container)
+        lc.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
+        lc.addWidget(self._perf_box())
+        lc.addWidget(self.live_panel)
         live_scroll = QtWidgets.QScrollArea()
         live_scroll.setWidgetResizable(True)
-        live_scroll.setWidget(self.live_panel)
+        live_scroll.setWidget(live_container)
         self.tabs.addTab(live_scroll, "Live")
         rv.addWidget(self.tabs, 1)
         rv.addWidget(self._render_box())
@@ -245,8 +258,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.p_trim.setSingleStep(0.1)
         self.p_trim.valueChanged.connect(self._prop_changed)
         props.addWidget(self.p_trim, 2, 3)
+        props.addWidget(QtWidgets.QLabel("Len s"), 3, 0)
+        self.p_len = QtWidgets.QDoubleSpinBox()
+        self.p_len.setRange(0, 600)
+        self.p_len.setSingleStep(0.5)
+        self.p_len.setSpecialValueText("full")     # 0 displays "full"
+        self.p_len.setToolTip("Layer length on the timeline (0 = full source). "
+                              "Use this to trim long webcam/screen layers.")
+        self.p_len.valueChanged.connect(self._prop_changed)
+        props.addWidget(self.p_len, 3, 1)
         self._props = [self.p_enabled, self.p_blend, self.p_opacity,
-                       self.p_start, self.p_trim]
+                       self.p_start, self.p_trim, self.p_len]
         v.addLayout(props)
         return box
 
@@ -279,6 +301,35 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cancel_btn.clicked.connect(self.cancel_render)
         self.cancel_btn.setEnabled(False)
         g.addWidget(self.cancel_btn, 2, 3)
+        return box
+
+    def _perf_box(self):
+        box = QtWidgets.QGroupBox("Performance — live output")
+        g = QtWidgets.QGridLayout(box)
+        g.addWidget(QtWidgets.QLabel("Audio in"), 0, 0)
+        self.audio_in_cb = QtWidgets.QComboBox()
+        self.audio_in_cb.addItem("default", None)
+        try:
+            import sounddevice as sd
+            for i, d in enumerate(sd.query_devices()):
+                if d["max_input_channels"] > 0:
+                    self.audio_in_cb.addItem(d["name"][:34], i)
+        except Exception:
+            pass
+        g.addWidget(self.audio_in_cb, 0, 1, 1, 2)
+        g.addWidget(QtWidgets.QLabel("Out res"), 1, 0)
+        self.live_res_cb = QtWidgets.QComboBox()
+        self.live_res_cb.addItems(["960x540", "1280x720", "640x360", "1920x1080"])
+        self.live_res_cb.setCurrentText("1280x720")
+        g.addWidget(self.live_res_cb, 1, 1)
+        self.golive_btn = QtWidgets.QPushButton("🔴 Go Live  →  virtual cam")
+        self.golive_btn.setCheckable(True)
+        self.golive_btn.setToolTip("Stream the live composite to a virtual webcam "
+                                   "(OBS/Zoom/browser) + react to live audio in")
+        self.golive_btn.toggled.connect(self._toggle_golive)
+        g.addWidget(self.golive_btn, 1, 2)
+        self.live_status = QtWidgets.QLabel("offline")
+        g.addWidget(self.live_status, 2, 0, 1, 3)
         return box
 
     def _sep(self):
@@ -457,6 +508,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _reprepare_and_audio(self):
         self._reprepare_granular()
+        self._rebuild_warps()
         self._rebuild_audio()
         self._composite_now()
 
@@ -520,6 +572,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.p_opacity.setValue(int(l.opacity * 100))
             self.p_start.setValue(l.start)
             self.p_trim.setValue(l.trim_in)
+            self.p_len.setValue(l.duration or 0.0)
         for w in self._props:
             w.blockSignals(False)
 
@@ -532,14 +585,16 @@ class MainWindow(QtWidgets.QMainWindow):
         l.opacity = self.p_opacity.value() / 100.0
         l.start = self.p_start.value()
         l.trim_in = self.p_trim.value()
+        l.duration = self.p_len.value() or None      # 0 = full source
         # update the list label without losing selection
         row = self.layer_list.currentRow()
         item = self.layer_list.item(row)
         if item:
             tag = "◆" if l.is_granular else "▣"
-            item.setText(f"{tag} {l.name}  [{l.blend}]{'' if l.enabled else '  (off)'}")
-        self._rebuild_audio()
-        self._composite_now()
+            dur = f" {l.duration:.1f}s" if l.duration else ""
+            item.setText(f"{tag} {l.name}  [{l.blend}]{dur}{'' if l.enabled else '  (off)'}")
+        # start/length change the timeline span -> re-derive grains, warps, beats bar
+        self._gran_timer.start(40)
 
     def _move_layer(self, delta):
         l = self.selected
@@ -658,6 +713,48 @@ class MainWindow(QtWidgets.QMainWindow):
         elif not self.timer.isActive():
             self._refresh.start(15)
 
+    # --------------------------------------------------------- go live (VJ)
+    def _toggle_golive(self, on):
+        if on:
+            if not self.timeline.layers:
+                self.golive_btn.setChecked(False)
+                QtWidgets.QMessageBox.information(self, "Go Live", "Add a layer first.")
+                return
+            try:
+                from glitchcore.output import VirtualCam
+                w, h = (int(x) for x in self.live_res_cb.currentText().split("x"))
+                self.live_cam = VirtualCam(w, h, self.timeline.fps or 30.0)
+            except Exception as e:
+                self.golive_btn.setChecked(False)
+                QtWidgets.QMessageBox.critical(
+                    self, "Virtual cam",
+                    f"Could not open virtual camera:\n{e}\n\n"
+                    "Needs v4l2loopback (modprobe v4l2loopback).")
+                return
+            # live audio-reactive: swap the envelope for a live input one
+            try:
+                from glitchcore.audio import LiveAudioEnv
+                self._prev_env = self.audio_env
+                self.live_audio_env = LiveAudioEnv(
+                    device=self.audio_in_cb.currentData()).start()
+                self.audio_env = self.live_audio_env
+            except Exception:
+                self.live_audio_env = None
+            if not self.timer.isActive():
+                self.toggle_play()
+            self.golive_btn.setText("⏹ Stop Live")
+            self.live_status.setText(f"🔴 LIVE → {self.live_cam.device}  ({self.live_cam.w}×{self.live_cam.h})")
+        else:
+            if self.live_cam is not None:
+                self.live_cam.close()
+                self.live_cam = None
+            if self.live_audio_env is not None:
+                self.live_audio_env.stop()
+                self.live_audio_env = None
+                self.audio_env = self._prev_env
+            self.golive_btn.setText("🔴 Go Live  →  virtual cam")
+            self.live_status.setText("offline")
+
     def apply_preset(self):
         if self.selected is None:
             QtWidgets.QMessageBox.information(self, "No layer", "Select a layer first.")
@@ -740,11 +837,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self.t = 0.0
             for l in self.timeline.layers:
                 l.chain.reset()
-            if self.mute_cb.isChecked():
+            if self.mute_cb.isChecked() and self.live_cam is None:
                 self.audio_player.play_from(0.0)
-        w, h = self._canvas()
-        frame = self.timeline.render_frame(self.t, w, h, self.clock, audio=self.audio_env)
-        self.preview.setPixmap(bgr_to_pixmap(frame))
+        if self.live_cam is not None:
+            # composite at the cam's resolution, stream it, show a scaled preview
+            frame = self.timeline.render_frame(self.t, self.live_cam.w, self.live_cam.h,
+                                               self.clock, audio=self.audio_env)
+            self.live_cam.send(frame)
+            pw, ph = self._canvas()
+            self.preview.setPixmap(bgr_to_pixmap(cv2.resize(frame, (pw, ph))))
+        else:
+            w, h = self._canvas()
+            frame = self.timeline.render_frame(self.t, w, h, self.clock, audio=self.audio_env)
+            self.preview.setPixmap(bgr_to_pixmap(frame))
         self._update_time()
 
     def seek_fraction(self, f):
@@ -824,6 +929,15 @@ class MainWindow(QtWidgets.QMainWindow):
             self.render_worker.cancel()
 
     # ------------------------------------------------------------- project
+    def open_node_editor(self):
+        from .node_editor import NodeEditor
+        if not self.timeline.layers:
+            QtWidgets.QMessageBox.information(
+                self, "Node Graph", "Add at least one layer first (its source feeds the graph).")
+            return
+        self._node_editor = NodeEditor(self)
+        self._node_editor.show()
+
     def save_project(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save project", "glitch.json", "Project (*.json)")
@@ -887,6 +1001,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def closeEvent(self, e):
         self.audio_player.stop()
+        if self.live_cam is not None:
+            self.live_cam.close()
+        if self.live_audio_env is not None:
+            self.live_audio_env.stop()
         if self.input_hub is not None:
             self.input_hub.stop()
             self.input_hub.wait(500)

@@ -133,8 +133,32 @@ Every effect can fire on the music:
 | Strobe / Invert | Beat-flash invert / white / black |
 | Databend (JPEG) | Real JPEG byte-corruption — compression-artifact glitch |
 | VHS / Decay | Scanlines + chroma bleed + noise |
+| Optical Datamosh | Real motion-vector melt (DIS optical flow) — controllable bloom |
+| Flow Smear | Push frame along its own motion — weird inbetween movement |
+| Depth Displace | Parallax keyed by depth (MiDaS-capable, luminance fallback) |
 
-**Presets:** `brainfuck`, `seizure`, `datamoshhell`, `vapordecay`, `pixelmelt`.
+**Presets:** `brainfuck`, `seizure`, `datamoshhell`, `vapordecay`, `pixelmelt`,
+`motionmelt`.
+
+## v2 — real-time, motion-aware glitch instrument
+
+- **Phase 1 — AI motion engine ✅** — `motion.py`: dense optical flow (OpenCV
+  DIS) + flow warping + depth → Optical Datamosh, Flow Smear, Depth Displace
+  (and the `motionmelt` preset). MiDaS depth (`motion.enable_midas()`) +
+  RAFT/RIFE neural interpolation are optional torch upgrades.
+- **Phase 2 — GPU real-time core ✅** — `gpu.py`: fragment-shader effects via
+  **moderngl** on the RTX GPU. The `Shader FX (GPU)` effect runs `chroma`,
+  `kaleido`, `crt`, `pixelate`, `bloom`, `displace` (per-thread GL context;
+  custom GLSL via `gpu.register_shader`).
+- **Phase 3 — node-graph architecture ✅** — `graph.py` + `gui/node_editor.py`:
+  a visual DAG of sources → effects → blends → **feedback loops** → output.
+  Click an output port then an input port to wire. Feedback taps a node's
+  previous frame (video-feedback trails, no infinite recursion). **🕸 Node Graph**
+  button in the toolbar.
+- **Phase 4 — performance / instrument mode ✅** — `output.py` (virtual cam via
+  **v4l2loopback**) + `audio.LiveAudioEnv` (live audio-in, adaptive envelopes).
+  The **Live** tab's "🔴 Go Live" streams the glitch composite to a virtual
+  webcam (OBS/Zoom/browser) while reacting to live audio and gamepad/MIDI.
 
 ## Datamosh (the real thing)
 

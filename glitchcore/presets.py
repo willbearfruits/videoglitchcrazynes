@@ -43,6 +43,14 @@ PRESETS: dict[str, list[tuple[str, dict]]] = {
         ("slice", {"amount": 0.5, "beat_mode": "pulse", "hold": 0.2,
                    "v": {"bands": 8, "max": 60}}),
     ],
+    "motionmelt": [   # v2 motion engine showcase
+        ("optimosh", {"beat_mode": "pulse", "beat_div": 2, "hold": 0.4,
+                      "v": {"strength": 1.8}}),
+        ("flowsmear", {"amount": 0.6, "mod_source": "rms", "mod_depth": 0.7,
+                       "v": {"reach": 3.0, "rate": 0}}),
+        ("depthpush", {"amount": 0.5, "v": {"amount": 60, "invert": 0}}),
+        ("rgbshift", {"amount": 0.5, "v": {"x": 10, "animate": 1}}),
+    ],
 }
 
 # presets that strongly benefit from the real codec datamosh pass

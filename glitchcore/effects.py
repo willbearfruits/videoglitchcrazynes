@@ -10,6 +10,7 @@ import cv2
 
 from .params import ParamSpec
 from .context import FrameContext, BeatClock
+from . import motion as mo
 
 REGISTRY: dict[str, type] = {}
 EFFECT_ORDER: list[str] = []
@@ -404,3 +405,106 @@ class VHS(Effect):
             noise = ctx.rng.integers(-n, n + 1, size=out.shape[:2], dtype=np.int16)
             out = np.clip(out.astype(np.int16) + noise[:, :, None], 0, 255).astype(np.uint8)
         return out
+
+
+# ======================================================================
+#  v2 — AI MOTION ENGINE (optical flow + depth)
+# ======================================================================
+
+@register
+class OpticalDatamosh(Effect):
+    """Real motion-vector datamosh: keep the old frame's pixels and push them
+    along the live optical flow — controllable melt/bloom, no codec luck."""
+    name, label, category = "optimosh", "Optical Datamosh", "motion"
+    PARAMS = {"strength": ParamSpec("Motion push", 0.2, 4.0, 1.4, 0.1)}
+
+    def __init__(self):
+        super().__init__()
+        self.beat_mode = "pulse"      # bloom on beats, refresh between
+
+    def reset(self):
+        self._pg = None
+        self._canvas = None
+
+    def process(self, frame, ctx, clock, s):
+        g = mo.gray(frame)
+        if self._canvas is None or self._canvas.shape != frame.shape:
+            self._pg = g
+            self._canvas = frame.copy()
+            return frame
+        fl = mo.flow(self._pg, g)
+        self._pg = g
+        self._canvas = mo.warp_by_flow(self._canvas, fl, self.v["strength"])
+        keep = float(s)               # 1 = pure bloom, 0 = refresh to live
+        self._canvas = cv2.addWeighted(self._canvas, keep, frame, 1.0 - keep, 0.0)
+        return self._canvas
+
+
+@register
+class FlowSmear(Effect):
+    """Push the current frame along its own motion — weird inbetween movement."""
+    name, label, category = "flowsmear", "Flow Smear", "motion"
+    PARAMS = {
+        "reach": ParamSpec("Reach", 0.5, 6.0, 2.5, 0.1),
+        "rate": ParamSpec("Wobble", 0, 8, 0, 0.5),
+    }
+
+    def reset(self):
+        self._pg = None
+
+    def process(self, frame, ctx, clock, s):
+        g = mo.gray(frame)
+        if self._pg is None or self._pg.shape != g.shape:
+            self._pg = g
+            return frame
+        fl = mo.flow(self._pg, g)
+        self._pg = g
+        t = self.v["reach"] * s
+        if self.v["rate"] > 0:
+            t *= np.sin(ctx.time * 2 * np.pi * self.v["rate"] * 0.2)
+        return mo.warp_by_flow(frame, fl, t)
+
+
+@register
+class DepthDisplace(Effect):
+    """Parallax displacement keyed by estimated depth (MiDaS if enabled, else
+    luminance pseudo-depth)."""
+    name, label, category = "depthpush", "Depth Displace", "motion"
+    PARAMS = {
+        "amount": ParamSpec("Push px", 0, 140, 50, 1, "int"),
+        "invert": ParamSpec("Invert", 0, 1, 0, 1, "bool"),
+    }
+
+    def process(self, frame, ctx, clock, s):
+        d = mo.depth(frame)
+        if self.v["invert"] > 0.5:
+            d = 1.0 - d
+        amt = self.v["amount"] * s
+        h, w = frame.shape[:2]
+        gx = np.arange(w, dtype=np.float32)[None, :]
+        gy = np.arange(h, dtype=np.float32)[:, None]
+        map_x = (gx + (d - 0.5) * amt * 2.0).astype(np.float32)
+        map_y = (gy + 0.0 * d).astype(np.float32)
+        return cv2.remap(frame, map_x, map_y, cv2.INTER_LINEAR,
+                         borderMode=cv2.BORDER_REFLECT)
+
+
+@register
+class ShaderFX(Effect):
+    """GPU fragment-shader effect (moderngl). Falls back to passthrough if no GL."""
+    name, label, category = "shaderfx", "Shader FX (GPU)", "gpu"
+    PARAMS = {
+        "shader": ParamSpec("Shader", 0, 5, 0, 1, "choice",
+                            ("chroma", "kaleido", "crt", "pixelate", "bloom", "displace")),
+        "p1": ParamSpec("Param 1", 0, 1, 0.5, 0.01),
+        "p2": ParamSpec("Param 2", 0, 1, 0.5, 0.01),
+    }
+
+    def process(self, frame, ctx, clock, s):
+        from . import gpu
+        name = gpu.SHADER_NAMES[int(self.v["shader"])]
+        try:
+            return gpu.process(name, frame, time=ctx.time, amount=s,
+                               p1=self.v["p1"], p2=self.v["p2"])
+        except Exception:
+            return frame

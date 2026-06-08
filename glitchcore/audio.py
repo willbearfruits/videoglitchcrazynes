@@ -146,3 +146,64 @@ class AudioPlayer:
             sd.stop()
         except Exception:
             pass
+
+
+class LiveAudioEnv:
+    """Real-time audio envelopes from a live input (mic / system loopback).
+    Interface-compatible with AudioEnv: value(source, t) + scaled()."""
+
+    def __init__(self, device=None, sr=None, block: int = 1024):
+        self.device = device
+        if sr is None:                      # use the device's native rate
+            try:
+                import sounddevice as sd
+                info = sd.query_devices(device, "input")
+                sr = int(info["default_samplerate"])
+            except Exception:
+                sr = 48000
+        self.sr = int(sr)
+        self.block = block
+        self._vals = {"rms": 0.0, "bass": 0.0, "mid": 0.0, "high": 0.0}
+        self._peak = {"rms": 1e-6, "bass": 1e-6, "mid": 1e-6, "high": 1e-6}
+        self._stream = None
+        self._win = np.hanning(block).astype(np.float32)
+        self._freqs = np.fft.rfftfreq(block, 1.0 / sr)
+
+    def start(self):
+        import sounddevice as sd
+        self._stream = sd.InputStream(
+            samplerate=self.sr, blocksize=self.block, channels=1,
+            device=self.device, dtype="float32", callback=self._cb)
+        self._stream.start()
+        return self
+
+    def _cb(self, indata, frames, t, status):
+        x = indata[:, 0]
+        if len(x) != self.block:
+            x = np.resize(x, self.block)
+        sp = np.abs(np.fft.rfft(x * self._win))
+        f = self._freqs
+        raw = {"bass": float(sp[f < 250].sum()),
+               "mid": float(sp[(f >= 250) & (f < 4000)].sum()),
+               "high": float(sp[f >= 4000].sum()),
+               "rms": float(np.sqrt(np.mean(x ** 2)) * 6.0)}
+        for k, val in raw.items():
+            pk = max(val, self._peak[k] * 0.999, 1e-6)   # adaptive auto-gain
+            self._peak[k] = pk
+            norm = min(1.0, val / pk)
+            self._vals[k] = self._vals[k] * 0.55 + norm * 0.45
+
+    def value(self, source: str, t: float = 0.0) -> float:
+        return float(self._vals.get(source, 0.0))
+
+    def scaled(self, factor: float):
+        return self
+
+    def stop(self):
+        if self._stream is not None:
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except Exception:
+                pass
+            self._stream = None

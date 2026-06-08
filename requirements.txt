@@ -9,3 +9,5 @@ python-rtmidi>=1.5 # MIDI input (live control)
 mss>=9.0           # screen capture source
 # ffmpeg + ffprobe must be on PATH (system packages, not pip)
 # gamepad also needs the user in the `input` group
+moderngl>=5.8     # GPU shader effects (Phase 2)
+pyvirtualcam>=0.10  # virtual cam output (Phase 4, needs v4l2loopback)
