@@ -50,6 +50,45 @@ class BeatWorker(QtCore.QThread):
         self.done.emit(result)
 
 
+class AudioImportWorker(QtCore.QThread):
+    """Analyze an imported audio (or video) file: beats + onsets + envelopes.
+    Works on audio-only files (media.probe needs a video stream, so we don't
+    use it here — duration comes from the decoded samples)."""
+    done = QtCore.Signal(dict)
+
+    def __init__(self, path):
+        super().__init__()
+        self.path = path
+
+    def run(self):
+        result = {"beats": [], "onsets": [], "tempo": 0.0, "env": None,
+                  "duration": 0.0, "path": self.path}
+        fd, wav = tempfile.mkstemp(suffix=".wav", prefix="glitch_imp_")
+        os.close(fd)
+        try:
+            if media.extract_audio(self.path, wav):
+                result.update(beatmod.detect_beats(wav))
+                try:
+                    import soundfile as sf
+                    y, file_sr = sf.read(wav, dtype="float32")
+                    if y.ndim > 1:
+                        y = y.mean(axis=1)
+                    result["duration"] = len(y) / float(file_sr or 1)
+                    result["env"] = audiomod.AudioEnv.analyze(y, file_sr)
+                except Exception:
+                    pass
+        except Exception:
+            log.exception("audio import failed")
+        finally:
+            try:
+                os.remove(wav)
+            except OSError:
+                pass
+        if not result["beats"]:
+            result["beats"] = beatmod.grid_beats(result["duration"] or 30.0, 120.0)
+        self.done.emit(result)
+
+
 class RenderWorker(QtCore.QThread):
     progress = QtCore.Signal(float, str)
     finished_ok = QtCore.Signal(bool, str)

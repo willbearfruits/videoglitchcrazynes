@@ -122,12 +122,34 @@ class AudioPlayer:
         self.buf = None
         self.sr = 22050
         self._ok = True
+        self._dev_sr = None
         try:
             import sounddevice  # noqa: F401
         except Exception:
             self._ok = False
 
+    def _device_sr(self):
+        if self._dev_sr is None:
+            try:
+                import sounddevice as sd
+                self._dev_sr = int(sd.query_devices(None, "output")["default_samplerate"])
+            except Exception:
+                self._dev_sr = 48000
+        return self._dev_sr
+
     def set_buffer(self, samples, sr):
+        # the output device may not accept the source rate (PortAudio doesn't
+        # resample) — resample once to the device's native rate so preview
+        # playback actually produces sound.
+        if samples is None:
+            self.buf = None
+            return
+        dsr = self._device_sr() if self._ok else sr
+        if dsr and sr != dsr:
+            n_out = max(1, int(round(len(samples) * dsr / sr)))
+            idx = np.linspace(0, len(samples) - 1, n_out)
+            samples = np.interp(idx, np.arange(len(samples)), samples).astype(np.float32)
+            sr = dsr
         self.buf = samples
         self.sr = sr
 

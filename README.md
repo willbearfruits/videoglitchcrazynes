@@ -79,7 +79,13 @@ granular idea, done in numpy (no C++).
 
 The original audio is muxed into every render (with `atempo` for speed). Granular
 layers synthesize their own glitch audio from the shared grain schedule. **Live
-preview audio** plays via `sounddevice` while you scrub/play (🔊 toggle).
+preview audio** plays via `sounddevice` while you scrub/play (🔊 toggle;
+auto-resampled to the output device's rate).
+
+**♪ Import Audio** loads a separate soundtrack (mp3/wav/flac/…) that drives the
+beat-sync + audio-reactive envelopes and is muxed into the render — i.e. chop the
+video to a *song*. Precedence for what you hear/render: imported track > granular
+layer audio > the first video layer's audio.
 
 ## Audio-reactive modulation
 

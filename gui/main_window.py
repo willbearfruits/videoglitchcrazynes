@@ -24,7 +24,7 @@ from glitchcore.live import WebcamSource, ScreenSource, find_webcam_index
 
 from .widgets import EffectCard, GranularPanel, LivePanel
 from .timeline import BeatBar
-from .render_worker import BeatWorker, TimelineRenderWorker
+from .render_worker import BeatWorker, TimelineRenderWorker, AudioImportWorker
 from .live_input import InputHub
 
 PREVIEW_W = 600
@@ -79,6 +79,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.timeline = Timeline(fps=30.0)
         self.beats, self.onsets = [], []
         self.audio_env = None
+        self.audio_track = None       # imported soundtrack path (overrides video audio)
         self.clock = BeatClock([], 30.0)
         self.selected: Layer | None = None
         self.t = 0.0
@@ -115,12 +116,18 @@ class MainWindow(QtWidgets.QMainWindow):
         b_cam.clicked.connect(self.add_webcam_layer)
         b_scr = QtWidgets.QPushButton("➕ Screen")
         b_scr.clicked.connect(self.add_screen_layer)
+        b_aud = QtWidgets.QPushButton("♪ Audio")
+        b_aud.setToolTip("Import a soundtrack (mp3/wav/…) to drive beats + audio "
+                         "reactivity and be muxed into the render")
+        b_aud.clicked.connect(self.import_audio)
         for b in (b_vid, b_gran, b_cam, b_scr):
             b.setObjectName("addBtn")
+        b_aud.setObjectName("addBtn")
         tb.addWidget(b_vid)
         tb.addWidget(b_gran)
         tb.addWidget(b_cam)
         tb.addWidget(b_scr)
+        tb.addWidget(b_aud)
         tb.addWidget(self._sep())
         tb.addWidget(QtWidgets.QLabel("Preset→layer:"))
         self.preset_cb = QtWidgets.QComboBox()
@@ -654,6 +661,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.beat_worker.start()
 
     def _beats_ready(self, result):
+        if self.audio_track:          # imported soundtrack wins over video audio
+            return
         self.beats = result.get("beats", [])
         self.onsets = result.get("onsets", [])
         self.audio_env = result.get("env")
@@ -663,6 +672,32 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status.showMessage(
             f"{len(self.beats)} beats · {result.get('tempo',0):.0f} BPM")
         self._composite_now()
+
+    def import_audio(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Import soundtrack", "",
+            "Audio/Video (*.mp3 *.wav *.flac *.ogg *.m4a *.aac *.mp4 *.mov *.mkv);;All (*)")
+        if not path:
+            return
+        self.audio_track = path
+        self.status.showMessage("Analyzing audio…")
+        self._audio_worker = AudioImportWorker(path)
+        self._audio_worker.done.connect(self._audio_imported)
+        self._audio_worker.start()
+
+    def _audio_imported(self, result):
+        self.beats = result.get("beats", [])
+        self.onsets = result.get("onsets", [])
+        self.audio_env = result.get("env")
+        self.clock = BeatClock(self.beats, self.timeline.fps)
+        self._rebuild_warps()
+        dur = max(0.1, self.timeline.duration() or result.get("duration", 0.0))
+        self.timebar.set_beats(self.beats, self.onsets, dur)
+        self._rebuild_audio()
+        self._composite_now()
+        name = result["path"].rsplit("/", 1)[-1]
+        self.status.showMessage(
+            f"♪ {name} · {len(self.beats)} beats · {result.get('tempo',0):.0f} BPM")
 
     # --------------------------------------------------------- granular prep
     def _video_span(self):
@@ -695,7 +730,10 @@ class MainWindow(QtWidgets.QMainWindow):
         buf, sr = None, 22050
         gl = next((l for l in reversed(self.timeline.layers)
                    if l.is_granular and l.enabled), None)
-        if gl is not None and getattr(gl, "_au", (None,))[0] is not None:
+        if self.audio_track:                          # imported soundtrack wins
+            samples, sr = self._load_src_audio(self.audio_track)
+            buf = samples
+        elif gl is not None and getattr(gl, "_au", (None,))[0] is not None:
             samples, sr = gl._au
             buf = A.granulate_audio(samples, sr, gl.granulator.grains,
                                     max(0.5, self.timeline.duration()))
@@ -1065,11 +1103,13 @@ class MainWindow(QtWidgets.QMainWindow):
         opts = RenderOptions(speed=self.speed.value(),
                              datamosh=self.datamosh_cb.isChecked(), gpu=True,
                              out_format=fmt, height=height)
-        # audio: prefer granular, else first video source
+        # audio: imported soundtrack > granular > first video source
         au, sr, asrc = None, 22050, None
         gl = next((l for l in reversed(self.timeline.layers)
                    if l.is_granular and l.enabled), None)
-        if gl is not None and getattr(gl, "_au", (None,))[0] is not None:
+        if self.audio_track:
+            asrc = self.audio_track
+        elif gl is not None and getattr(gl, "_au", (None,))[0] is not None:
             samples, sr = gl._au
             au = A.granulate_audio(samples, sr, gl.granulator.grains,
                                    max(0.5, self.timeline.duration()))
