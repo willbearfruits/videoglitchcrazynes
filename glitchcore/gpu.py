@@ -99,6 +99,7 @@ class _Engine:
         self.vaos = {}
         self.tex = None
         self.fbo = None
+        self.fbo_tex = None
         self.size = (0, 0)
 
     def _prog(self, name):
@@ -111,13 +112,13 @@ class _Engine:
     def run(self, name, frame, time, amount, p1, p2):
         h, w = frame.shape[:2]
         if self.size != (w, h):
-            if self.tex:
-                self.tex.release()
-            if self.fbo:
-                self.fbo.release()
+            for o in (self.tex, self.fbo, self.fbo_tex):
+                if o:
+                    o.release()
             self.tex = self.ctx.texture((w, h), 3)
             self.tex.repeat_x = self.tex.repeat_y = True
-            self.fbo = self.ctx.framebuffer(color_attachments=[self.ctx.texture((w, h), 3)])
+            self.fbo_tex = self.ctx.texture((w, h), 3)   # keep a handle so it can be freed
+            self.fbo = self.ctx.framebuffer(color_attachments=[self.fbo_tex])
             self.size = (w, h)
         self.tex.write(np.ascontiguousarray(frame).tobytes())
         prog, vao = self._prog(name)
@@ -138,6 +139,12 @@ class _Engine:
         data = np.frombuffer(self.fbo.read(components=3), dtype=np.uint8).reshape(h, w, 3)
         return np.ascontiguousarray(data)
 
+    def release(self):
+        try:
+            self.ctx.release()        # frees the standalone context + its resources
+        except Exception:
+            pass
+
 
 def _engine():
     e = getattr(_local, "engine", None)
@@ -145,6 +152,14 @@ def _engine():
         e = _Engine()
         _local.engine = e
     return e
+
+
+def release_local():
+    """Release this thread's GL context (call when a render thread finishes)."""
+    e = getattr(_local, "engine", None)
+    if e is not None:
+        e.release()
+        _local.engine = None
 
 
 def register_shader(name: str, fragment_src: str):

@@ -106,8 +106,10 @@ def find_webcam_index():
                   if p.rsplit("video", 1)[1].isdigit())
     for i in idxs or range(0, 10):
         cap = cv2.VideoCapture(i)
-        ok = cap.isOpened() and cap.read()[0]
-        cap.release()
+        try:
+            ok = cap.isOpened() and cap.read()[0]
+        finally:
+            cap.release()
         if ok:
             return i
     return None

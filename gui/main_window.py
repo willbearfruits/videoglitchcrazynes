@@ -615,9 +615,14 @@ class MainWindow(QtWidgets.QMainWindow):
         path = self._pick_video()
         if not path:
             return
-        gsrc = VideoSource(path)
+        try:
+            gsrc = VideoSource(path)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Error", str(e))
+            return
         frames = gsrc.preload(work_w=480, max_frames=600)
         if not frames:
+            gsrc.release()
             QtWidgets.QMessageBox.critical(self, "Error", "No frames decoded.")
             return
         self._layer_count += 1

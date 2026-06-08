@@ -10,12 +10,14 @@ log = logging.getLogger(__name__)
 
 
 def load_audio(video_path: str, sr: int = 22050):
-    """Extract + load a video's audio as mono float32. (samples, sr) or (None,sr)."""
+    """Extract + load a video's audio as mono float32. (samples, sr) or (None,sr).
+    Caches the extracted wav per source (stable hash, so reuse actually works)."""
     import os
     import tempfile
-    wav = os.path.join(tempfile.gettempdir(),
-                       "glitch_au_" + str(abs(hash(video_path)) % 99999) + ".wav")
-    if not media.extract_audio(video_path, wav):
+    import hashlib
+    digest = hashlib.md5(video_path.encode("utf-8", "replace")).hexdigest()[:12]
+    wav = os.path.join(tempfile.gettempdir(), f"glitch_au_{digest}.wav")
+    if not os.path.exists(wav) and not media.extract_audio(video_path, wav):
         return None, sr
     try:
         import soundfile as sf

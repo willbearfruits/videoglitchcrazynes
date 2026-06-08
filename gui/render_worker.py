@@ -1,13 +1,17 @@
 """Background workers: beat detection + full render (each on its own QThread)."""
 from __future__ import annotations
 import os
+import logging
 import tempfile
 from PySide6 import QtCore
 
 from glitchcore import beat as beatmod, media
 from glitchcore import audio as audiomod
+from glitchcore import gpu
 from glitchcore.chain import Chain
 from glitchcore.renderer import render, render_timeline, RenderOptions
+
+log = logging.getLogger(__name__)
 
 
 class BeatWorker(QtCore.QThread):
@@ -22,17 +26,24 @@ class BeatWorker(QtCore.QThread):
         result = {"beats": [], "onsets": [], "tempo": 0.0,
                   "duration": info.duration, "env": None}
         if info.has_audio:
-            wav = os.path.join(tempfile.gettempdir(), "glitch_beats.wav")
-            if media.extract_audio(self.path, wav):
-                result.update(beatmod.detect_beats(wav))
+            fd, wav = tempfile.mkstemp(suffix=".wav", prefix="glitch_beats_")
+            os.close(fd)
+            try:
+                if media.extract_audio(self.path, wav):
+                    result.update(beatmod.detect_beats(wav))
+                    try:
+                        import soundfile as sf
+                        y, file_sr = sf.read(wav, dtype="float32")
+                        if y.ndim > 1:
+                            y = y.mean(axis=1)
+                        result["env"] = audiomod.AudioEnv.analyze(y, file_sr)
+                    except Exception:
+                        result["env"] = None
+            finally:
                 try:
-                    import soundfile as sf
-                    y, file_sr = sf.read(wav, dtype="float32")
-                    if y.ndim > 1:
-                        y = y.mean(axis=1)
-                    result["env"] = audiomod.AudioEnv.analyze(y, file_sr)
-                except Exception:
-                    result["env"] = None
+                    os.remove(wav)
+                except OSError:
+                    pass
         if not result["beats"]:
             # no audio / silent — fall back to a 120bpm grid so beat fx still fire
             result["beats"] = beatmod.grid_beats(info.duration, 120.0)
@@ -66,7 +77,10 @@ class RenderWorker(QtCore.QThread):
             else:
                 self.finished_ok.emit(False, "Cancelled")
         except Exception as e:  # pragma: no cover
+            log.exception("render failed")
             self.finished_ok.emit(False, f"Error: {e}")
+        finally:
+            gpu.release_local()        # free this thread's GL context, if any
 
 
 class TimelineRenderWorker(QtCore.QThread):
@@ -101,4 +115,7 @@ class TimelineRenderWorker(QtCore.QThread):
                 audio_src_path=self.audio_src_path, audio_env=self.audio_env)
             self.finished_ok.emit(bool(ok), self.out_path if ok else "Cancelled")
         except Exception as e:  # pragma: no cover
+            log.exception("timeline render failed")
             self.finished_ok.emit(False, f"Error: {e}")
+        finally:
+            gpu.release_local()        # free this thread's GL context, if any
