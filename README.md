@@ -35,8 +35,11 @@ Prebuilt, ffmpeg-bundled binaries are on the
 | Platform | File | First run |
 |---|---|---|
 | Linux | `CrazyVideoGlitchEditor-linux-x86_64.AppImage` | `chmod +x *.AppImage && ./*.AppImage` |
-| Windows | `CrazyVideoGlitchEditor-windows-x64.zip` | unzip, run `CrazyVideoGlitchEditor.exe` |
-| macOS | `CrazyVideoGlitchEditor-macos.zip` | unzip; unsigned, so right-click → Open |
+| Windows | _coming soon_ | unzip, run `CrazyVideoGlitchEditor.exe` |
+| macOS | _coming soon_ | unzip; unsigned, so right-click → Open |
+
+Until then, Windows/macOS users can [run from source](#run-from-source) or
+build locally — see [`packaging/BUILD.md`](packaging/BUILD.md).
 
 The editor is cross-platform. Two features are Linux-only as built: webcam
 capture (`/dev/video*`) and the PipeWire audio path; the "Go Live" virtual cam

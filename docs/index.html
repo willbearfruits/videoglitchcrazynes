@@ -121,6 +121,10 @@
   .dl .go{margin-top:18px;font-weight:700;color:#04161c;text-align:center;
     background:linear-gradient(180deg,#38f0ff,#00a8c8);border-radius:8px;padding:10px}
   .dl .note{margin-top:14px;font-size:13px;color:var(--mut2);line-height:1.45}
+  .dl-soon{opacity:.6;cursor:default}
+  .dl-soon:hover{border-color:var(--line);transform:none}
+  .go-soon{margin-top:18px;font-weight:700;text-align:center;border-radius:8px;
+    padding:10px;background:#1b1b28;color:var(--mut);border:1px solid var(--line)}
   .dlfoot{margin-top:22px;color:var(--mut);font-size:14px}
   .dlfoot code{background:#13131c;color:var(--mut2);padding:1px 6px;border-radius:5px;
     font-family:"Space Mono",monospace}
@@ -175,9 +179,9 @@
   <div class="wrap">
     <div class="eyebrow">Download</div>
     <h2>Get the app</h2>
-    <p class="sub">Prebuilt for Linux, Windows and macOS — ffmpeg is bundled, so
-      there's nothing else to install. Built automatically from source on every
-      release.</p>
+    <p class="sub">Prebuilt for Linux now, with Windows and macOS on the way —
+      ffmpeg is bundled, so there's nothing else to install. Built automatically
+      from source on every release.</p>
     <div class="dls">
       <a class="dl" href="https://github.com/willbearfruits/videoglitchcrazynes/releases/latest/download/CrazyVideoGlitchEditor-linux-x86_64.AppImage">
         <span class="os">Linux</span>
@@ -186,20 +190,18 @@
         <span class="note">Make it executable and run:
           <br><code>chmod +x *.AppImage &amp;&amp; ./*.AppImage</code></span>
       </a>
-      <a class="dl" href="https://github.com/willbearfruits/videoglitchcrazynes/releases/latest/download/CrazyVideoGlitchEditor-windows-x64.zip">
+      <div class="dl dl-soon">
         <span class="os">Windows</span>
         <span class="fmt">ZIP · x64</span>
-        <span class="go">Download</span>
-        <span class="note">Unzip, then run
-          <code>CrazyVideoGlitchEditor.exe</code>.</span>
-      </a>
-      <a class="dl" href="https://github.com/willbearfruits/videoglitchcrazynes/releases/latest/download/CrazyVideoGlitchEditor-macos.zip">
+        <span class="go-soon">Coming soon</span>
+        <span class="note">A Windows build is on the way — check back shortly.</span>
+      </div>
+      <div class="dl dl-soon">
         <span class="os">macOS</span>
         <span class="fmt">ZIP · Intel / Apple&nbsp;Silicon</span>
-        <span class="go">Download</span>
-        <span class="note">Unsigned: first launch is right-click &rarr; Open
-          (or <code>xattr -dr com.apple.quarantine</code>).</span>
-      </a>
+        <span class="go-soon">Coming soon</span>
+        <span class="note">A macOS build is on the way — check back shortly.</span>
+      </div>
     </div>
     <p class="dlfoot">No prebuilt binary for your system?
       <a href="#run">Run it from source</a> — it's a few commands. All releases
