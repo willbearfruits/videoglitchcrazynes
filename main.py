@@ -47,8 +47,22 @@ def run_cli(argv):
 
 
 def run_gui():
+    import os
+    import PySide6
     from PySide6 import QtWidgets
-    from gui.main_window import MainWindow
+    from gui.main_window import MainWindow  # importing this pulls in cv2
+
+    # opencv-python bundles its own (Qt5) Qt plugins and unconditionally points
+    # QT_QPA_PLATFORM_PLUGIN_PATH at them on import, shadowing PySide6's Qt6
+    # "xcb" plugin. The GUI then aborts with "Could not find the Qt platform
+    # plugin xcb" — reliably reproducible when launched from the .desktop entry
+    # (a bare desktop session, no shell to repair the fallback). Repoint the var
+    # at PySide6's own plugins, after cv2 is imported, before constructing the app.
+    _platforms = os.path.join(
+        os.path.dirname(PySide6.__file__), "Qt", "plugins", "platforms")
+    if os.path.isdir(_platforms):
+        os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = _platforms
+
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName("Crazy Video Glitch Editor")
     win = MainWindow()

@@ -141,6 +141,14 @@ handles mp4/webm/gif + resolution scaling). `render()` is single-input;
 
 ## Gotchas
 
+- **opencv shadows PySide6's Qt plugins.** Importing `cv2` (pulled in via
+  `gui.main_window`) unconditionally points `QT_QPA_PLATFORM_PLUGIN_PATH` at
+  opencv's bundled Qt5 plugins, shadowing PySide6's Qt6 `xcb` plugin → the GUI
+  aborts with "Could not find the Qt platform plugin xcb" (reliably when launched
+  from the `.desktop` entry, which has no shell to repair the fallback).
+  `main.run_gui()` repoints the var at PySide6's own `platforms` dir **after** cv2
+  is imported and **before** constructing `QApplication`. Keep that order if you
+  touch the launcher.
 - **Never `pkill -f main.py`** to stop the app — it matches other projects'
   `main.py` and even the killing shell's own command line. Find the PID by cwd
   (`readlink /proc/$pid/cwd`) and `kill` that exact number.
