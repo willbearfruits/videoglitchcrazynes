@@ -1,130 +1,79 @@
-# CRAZY VIDEO GLITCH EDITOR
+# Crazy Video Glitch Editor
 
-Post-production chaos machine — channel lobotomy, datamosh, freezes, frame
-shuffling, zoom-punches, pixel melt and strobe, all **beat-synced** to the
-audio. With **multi-layer compositing** (weird blend modes), **frame granular
-synthesis** (a video grain-cloud + matching granular *audio*), **audio-reactive
-modulation**, a one-button **Auto-Lobotomizer** (beat-driven time-remap +
-glitch chain), **live performance control** (gamepad / MIDI / webcam / screen),
-a real **databend** effect, **live preview sound**, and **mp4 / webm / gif
-export**. Desktop GUI with live preview + a real ffmpeg/opencv render backend.
+Take a clip, destroy it on the beat. A desktop video glitch editor for
+datamosh, channel lobotomy, pixel-sort melt, frame-granular synthesis and
+audio-reactive chaos — with a live preview and a real ffmpeg/opencv render
+backend.
 
-![effects](docs/contact.png)
+![The editor with a datamosh chain running](docs/screenshots/editor.png)
+
+## What it is
+
+A headless glitch engine (`glitchcore/`, no Qt) plus a PySide6 desktop GUI.
+Every effect can fire on detected beats and react to the audio, so a render is
+chopped, reordered and corrupted in time with the music instead of by hand. It
+ships with multi-layer compositing, frame-granular synthesis (a video grain
+cloud *and* matching granular audio from the same schedule), a one-button
+Auto-Lobotomizer, optical-flow datamosh, GPU shaders, a node-graph mode, and
+live performance control (gamepad / MIDI / webcam / screen → a virtual cam).
+
+The engine is fully scriptable on its own — the command-line renderer uses it
+directly, with no GUI in the loop.
+
+| Pixel-sort melt | Auto-Lobotomizer (time-warp + glitch chain) |
+|---|---|
+| ![Pixel-sort melt preset](docs/screenshots/editor-pixelmelt.png) | ![Auto-Lobotomizer output](docs/screenshots/editor-lobotomy.png) |
+
+![A test pattern through several effects](docs/screenshots/effects-gallery.png)
 
 ## Run
 
 ```bash
-./run.sh                 # launch the GUI
-# or
-python3 main.py
+pip install -r requirements.txt
+./run.sh                      # or: python3 main.py
 ```
 
-Batch render from the command line (no GUI):
+Batch render from the command line (no GUI — two positional args switch to CLI):
 
 ```bash
-python3 main.py input.mp4 out.mp4 --preset brainfuck --datamosh --speed 1.5
+python3 main.py in.mp4 out.mp4 --preset brainfuck --datamosh --speed 1.5 --seed 42
 ```
 
-Requires `ffmpeg` + `ffprobe` on PATH and the packages in `requirements.txt`
-(`pip install -r requirements.txt`). Encode uses `h264_nvenc` (NVIDIA GPU) when
-available and falls back to `libx264` otherwise.
+Requires `ffmpeg` + `ffprobe` on `PATH`. Encoding uses `h264_nvenc` (NVIDIA) when
+available and falls back to `libx264`. Optional extras: `torch` enables real
+MiDaS depth in Depth Displace; live features need system **portaudio** (audio)
+and **v4l2loopback** (virtual cam); GPU shaders need a working GL context.
 
-Optional extras: `torch` enables real MiDaS depth in **Depth Displace**
-(`motion.enable_midas()` downloads a ~80 MB model on first use); live features
-need system **portaudio** (audio) and **v4l2loopback** (virtual cam).
+`./install.sh` adds a desktop launcher (app menu + Desktop) for double-click
+launch.
 
-## How to use the GUI
+## How it works
 
-1. **➕ Video Layer** — add a clip. Beats/onsets are detected automatically from
-   the first video layer (cyan = beats, dim = onsets). Silent clips fall back to
-   a 120 BPM grid.
-2. **➕ Granular Layer** — pick a clip to shatter into a frame **grain cloud**
-   (see below). It also produces matching granular *audio*.
-3. **Layers** panel (bottom→top compositing): select a layer to edit it; set its
-   **blend mode**, **opacity**, timeline **start** and **trim**; reorder ▲▼.
-4. With a layer selected, the **Effects** tab is its effect stack; the
-   **Granular** tab is its grain controls (granular layers only).
-   Each effect card has: enable, **Amount**, **Beat** mode (`always` / `pulse` /
-   `gate`) + division (`÷N` = every Nth beat) + **Hold**, then its own params.
-5. **Load a preset** to drop a chain onto the selected layer, **Add fx**, or
-   **🧠 Lobotomize** a video layer to auto-generate the whole edit. **Save FX**
-   stores a chain as a reusable preset. Each effect can be **audio-reactive**
-   (Audio source + Mod depth) and the **Live** tab maps a gamepad/MIDI to it.
-6. Scrub / **Play** to preview live (🔊 toggles sound).
-7. Pick **Format** (mp4/webm/gif) + **Res**, set **Speed**, toggle **Datamosh**,
-   hit **⚡ RENDER**.
+- **Effects** (`glitchcore/effects.py`) — every effect subclasses `Effect` and
+  declares its parameters; the GUI builds the controls for it automatically. The
+  base class handles beat-sync and audio modulation for free, so an effect's
+  strength is `beat_gate × amount × audio` every frame.
+- **Beat sync** — beats and onsets are detected with librosa from the first
+  video layer (or an imported soundtrack). Each effect runs `always`, as a
+  decaying `pulse` after each beat, or hard-`gate`d for a hold time, optionally
+  only every Nth beat.
+- **Audio-reactive** — each effect can track an audio band (`rms`/`bass`/`mid`/
+  `high`) so loudness drives grain density, bass drives zoom punches, highs drive
+  RGB tear, and so on.
+- **Compositing** — `Chain` (ordered effects) → `Layer` (a source + placement +
+  blend + its own chain) → `Timeline` (layers composited bottom-to-top with
+  blend modes). A layer's source is a video, a granulator, or a live webcam/
+  screen, and a beat-driven time-warp can remap a layer's content time against a
+  steady music bed (freeze / ramp / reverse / jump).
+- **Frame granular synthesis** (`granular.py`) — a clip is shattered into a cloud
+  of windowed frame grains scattered in space and time. The *same* grain
+  schedule drives the audio granulator, so picture and sound granulate in
+  lockstep.
+- **Datamosh** (`datamosh.py`) — the real thing: frames are encoded to an mpeg4
+  AVI with recurring I-frames, then I-frames are stripped at the byte level so
+  P-frame motion vectors bloom over the wrong content. Not a shader fake.
 
-## Layers, blend modes & timeline
-
-Stack any number of video/granular layers; each is composited bottom→top with a
-blend mode and opacity, and runs through its own effect chain. Blend modes:
-`normal, add, screen, multiply, difference, exclusion, lighten, darken, overlay,
-hardlight, subtract, divide, xor, and, or, average`. Per-layer **start** and
-**trim** place clips on the timeline so they hit at different times — the
-"chopped, reordered clips" of a lobotomy edit.
-
-## Frame granular synthesis
-
-A *grain* is a short slice of a clip — a patch of a frame, played from some
-position at some rate for some duration, windowed and scattered in space and
-time. Many overlapping grains resynthesize a new "cloud" clip. Controls mirror
-audio granular synthesis: **density** (grains/sec), **grain size**, **position**
-+ **scan** + **spray** (where in the source), **rate** + jitter + **reverse**
-(playback speed/direction), **grain area** + **scatter** + **zoom** + **angle**
-(spatial), and grain **blend**/**gain**. The *same grain schedule* drives the
-audio granulator, so picture and sound granulate in lockstep — the JUCE/Faust
-granular idea, done in numpy (no C++).
-
-## Sound
-
-The original audio is muxed into every render (with `atempo` for speed). Granular
-layers synthesize their own glitch audio from the shared grain schedule. **Live
-preview audio** plays via `sounddevice` while you scrub/play (🔊 toggle;
-auto-resampled to the output device's rate).
-
-**♪ Import Audio** loads a separate soundtrack (mp3/wav/flac/…) that drives the
-beat-sync + audio-reactive envelopes and is muxed into the render — i.e. chop the
-video to a *song*. Precedence for what you hear/render: imported track > granular
-layer audio > the first video layer's audio.
-
-## Audio-reactive modulation
-
-Every effect card has an **Audio** source (`rms` / `bass` / `mid` / `high`) and a
-**Mod depth**. The effect's strength then tracks that audio band — bass → zoom
-punch, highs → RGB tear, loudness → grain density — composed with the beat gate.
-Envelopes are analysed from the music with librosa (STFT bands + RMS).
-
-## Auto-Lobotomizer & time-warp
-
-**🧠 Lobotomize** (on a selected video layer) generates the whole lobotomy edit:
-a **beat-driven time-warp** (freeze / speed-ramp / reverse / jump per beat that
-remaps the *video* sampling against a steady music bed — audio stays in sync) plus
-an audio-reactive, beat-synced glitch chain, and turns on Datamosh. The time-warp
-is its own engine piece (`warp.py`) usable on any layer.
-
-## Live performance control
-
-The **Live** tab maps an Xbox-style **gamepad** (pygame) and **MIDI** (rtmidi) to
-params of the selected layer — stick/triggers/buttons or CCs → effect amounts and
-granular controls, live. Add a **➕ Webcam** or **➕ Screen** layer as a live
-source (they record whatever's happening when you render). Gamepad needs a
-controller connected and the user in the `input` group
-(`sudo usermod -aG input $USER`, then re-login).
-
-## Export & presets
-
-Render to **mp4 / webm / gif** at **Source / 1080p / 720p / 480p**. **Save FX**
-stores the selected layer's effect chain as a named user preset (in `fx_presets/`)
-that shows up in the preset dropdown alongside the built-ins.
-
-## Beat sync — the secret sauce
-
-Every effect can fire on the music:
-
-- **always** — runs on every frame.
-- **pulse** — strength decays after each beat (zoom-punches, shake bursts).
-- **gate** — hard on for `Hold` seconds after each beat (strobe, slice).
-- **÷N** — only act on every Nth beat (`÷4` = once a bar).
+For the full architecture, see [`CLAUDE.md`](CLAUDE.md).
 
 ## Effects
 
@@ -141,97 +90,28 @@ Every effect can fire on the music:
 | Slice Displace | Random horizontal tear bands |
 | Wave Warp | Sinusoidal row displacement |
 | Strobe / Invert | Beat-flash invert / white / black |
-| Databend (JPEG) | Real JPEG byte-corruption — compression-artifact glitch |
+| Databend (JPEG) | Real JPEG byte-corruption glitch |
 | VHS / Decay | Scanlines + chroma bleed + noise |
-| Optical Datamosh | Real motion-vector melt (DIS optical flow) — controllable bloom |
-| Flow Smear | Push frame along its own motion — weird inbetween movement |
-| Depth Displace | Parallax keyed by depth (MiDaS-capable, luminance fallback) |
+| Optical Datamosh | Motion-vector melt (DIS optical flow) |
+| Flow Smear | Push the frame along its own motion |
+| Depth Displace | Parallax keyed by depth (MiDaS or luminance) |
 
-**Presets:** `brainfuck`, `seizure`, `datamoshhell`, `vapordecay`, `pixelmelt`,
-`motionmelt`.
+Presets: `brainfuck`, `seizure`, `datamoshhell`, `vapordecay`, `pixelmelt`,
+`motionmelt`. Export to mp4 / webm / gif at source / 1080p / 720p / 480p.
 
-## v2 — real-time, motion-aware glitch instrument
+## Inspiration
 
-- **Phase 1 — AI motion engine ✅** — `motion.py`: dense optical flow (OpenCV
-  DIS) + flow warping + depth → Optical Datamosh, Flow Smear, Depth Displace
-  (and the `motionmelt` preset). MiDaS depth (`motion.enable_midas()`) +
-  RAFT/RIFE neural interpolation are optional torch upgrades.
-- **Phase 2 — GPU real-time core ✅** — `gpu.py`: fragment-shader effects via
-  **moderngl** on the RTX GPU. The `Shader FX (GPU)` effect runs `chroma`,
-  `kaleido`, `crt`, `pixelate`, `bloom`, `displace` (per-thread GL context;
-  custom GLSL via `gpu.register_shader`).
-- **Phase 3 — node-graph architecture ✅** — `graph.py` + `gui/node_editor.py`:
-  a visual DAG of sources → effects → blends → **feedback loops** → output.
-  Click an output port then an input port to wire. Feedback taps a node's
-  previous frame (video-feedback trails, no infinite recursion). **🕸 Node Graph**
-  button in the toolbar.
-- **Phase 4 — performance / instrument mode ✅** — `output.py` (virtual cam via
-  **v4l2loopback**) + `audio.LiveAudioEnv` (live audio-in, adaptive envelopes).
-  The **Live** tab's "🔴 Go Live" streams the glitch composite to a virtual
-  webcam (OBS/Zoom/browser) while reacting to live audio and gamepad/MIDI.
-
-## Datamosh (the real thing)
-
-When enabled, the frame chain is encoded to an mpeg4 AVI with recurring
-I-frames, then I-frames are stripped at the byte level (`glitchcore/datamosh.py`)
-so P-frame motion vectors bloom over the wrong content — true codec corruption,
-not a shader fake. Best-effort: if the parse looks wrong it falls back to the
-clean render.
-
-## Architecture
-
-```
-glitchcore/        headless engine (no Qt) — importable / scriptable
-  effects.py       all effects + registry (subclass Effect, auto-registers)
-  chain.py         ordered effect stack applied per frame
-  context.py       FrameContext + BeatClock (musical timing)
-  beat.py          librosa beat/onset detection
-  blend.py         layer blend modes (normal … xor/average)
-  sources.py       VideoSource — random-access frame cache + preloader
-  live.py          Webcam + Screen live sources
-  granular.py      frame granular synthesis (Grain + Granulator)
-  audio.py         audio load, granular audio, AudioEnv (reactive), live player
-  warp.py          beat-driven variable time-remap (TimeWarp)
-  auto.py          Auto-Lobotomizer (warp + glitch chain generator)
-  comp.py          Layer (+warp) + Timeline compositor
-  media.py         ffprobe + ffmpeg frame-pipe encode/mux (+ atempo for speed)
-  datamosh.py      raw AVI I-frame stripper
-  renderer.py      render() single-input + render_timeline() multi-layer
-  presets.py       preset chains
-gui/               PySide6 UI on top of the engine
-  main_window.py   layers, preview, effect/granular/live tabs, audio, render
-  widgets.py       param controls + effect card + granular panel + live panel
-  timeline.py      beat-marked timeline / playhead
-  live_input.py    gamepad (pygame) + MIDI (rtmidi) input hub
-  render_worker.py beat + single + timeline render QThreads
-main.py            GUI launcher / CLI batch render
-```
-
-The engine is fully decoupled from the GUI — add an effect by subclassing
-`Effect` and declaring `PARAMS`; the GUI builds its controls automatically.
-
-## Inspiration / research
-
-- **Lobotomy-core / free-lobotomy** edits — chopped clips, playback glitches,
-  freeze-before-the-sting, hard cut after, over breakcore. The "chop + reorder +
-  beat-sync" blueprint behind layers + granular.
+- **Lobotomy-core edits** — chopped clips, playback glitches, freeze-before-the-
+  sting, hard cut after, over breakcore. The chop-reorder-beat-sync blueprint
+  behind layers and granular.
 - **Video Granular Synthesis** — Forbes, *Computational Aesthetics* 2015
   ([pdf](https://angusforbes.com/pdfs/Forbes_VideoGranularSynthesis_CAe2015.pdf)):
-  grains = frames/time-slices, cloned/rotated/resized/repositioned in space &
-  time, scattered asynchronously into clouds. The model behind `granular.py`.
-- **Glitch art / digital anti-art** — Rosa Menkman (error as expression,
-  anti-resolution), JODI, databending & datamoshing
-  ([overview](https://en.wikipedia.org/wiki/Glitch_art)). The why behind
-  Databend + Datamosh.
+  grains as frame/time-slices cloned and scattered into clouds. The model behind
+  `granular.py`.
+- **Glitch art / digital anti-art** — Rosa Menkman, JODI, databending and
+  datamoshing ([overview](https://en.wikipedia.org/wiki/Glitch_art)). The why
+  behind Databend and Datamosh.
 
-## Notes / roadmap
+## License
 
-- Preview runs at 1× speed (downscaled); the **Speed** control affects the
-  final render only. Granular audio ignores global Speed (it has its own timing).
-- `px`-based effects are previewed on a downscaled frame, so magnitudes look a
-  touch larger than the full-res render.
-- Live preview audio is the source/granular buffer played free-running; it can
-  drift slightly from the QTimer-driven video over long clips.
-- Next: variable (beat-driven) time-remap, audio-reactive amount envelopes,
-  optical-flow datamosh, per-effect timeline ranges, drag-on-timeline clip UI,
-  real-time granular audio streaming.
+MIT — see [`LICENSE`](LICENSE). Copyright (c) 2026 willbearfruits.
