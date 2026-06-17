@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Crazy Video Glitch Editor — datamosh, granular &amp; beat-synced glitch</title>
+<meta name="description" content="A desktop video glitch editor for datamosh, channel lobotomy, pixel-sort and frame-granular synthesis — every effect beat-synced and audio-reactive, rendered with ffmpeg and opencv.">
+<link rel="canonical" href="https://willbearfruits.github.io/videoglitchcrazynes/">
+
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://willbearfruits.github.io/videoglitchcrazynes/">
+<meta property="og:title" content="Crazy Video Glitch Editor">
+<meta property="og:description" content="Take a clip, destroy it on the beat. Datamosh, channel lobotomy, pixel-sort melt and frame-granular synthesis in a desktop editor with a real ffmpeg/opencv render backend.">
+<meta property="og:image" content="https://willbearfruits.github.io/videoglitchcrazynes/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Crazy Video Glitch Editor">
+<meta name="twitter:description" content="Take a clip, destroy it on the beat. Datamosh, granular video and audio-reactive chaos in a desktop glitch editor.">
+<meta name="twitter:image" content="https://willbearfruits.github.io/videoglitchcrazynes/og-image.png">
+
+<link rel="icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg0:#0f0f17; --bg1:#08080c; --panel:#13131c; --card:#181822;
+    --line:#25253a; --ink:#e6e6f2; --mut:#8a8aa4; --mut2:#b8b8cc;
+    --cyan:#00e5ff; --mag:#ff2d7e; --vio:#a855f7;
+    --maxw:1120px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:"Inter",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    color:var(--ink);line-height:1.6;-webkit-font-smoothing:antialiased;
+    background:
+      radial-gradient(1100px 700px at 85% -8%, rgba(255,45,126,.12), transparent 60%),
+      radial-gradient(1000px 760px at -8% 18%, rgba(0,229,255,.12), transparent 55%),
+      linear-gradient(180deg,var(--bg0),var(--bg1) 60%);
+    background-attachment:fixed;min-height:100vh;
+  }
+  body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:1;opacity:.35;
+    background:repeating-linear-gradient(to bottom,rgba(0,0,0,0) 0 2px,rgba(0,0,0,.16) 2px 3px)}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px;position:relative;z-index:2}
+  a{color:var(--cyan);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .mono{font-family:"Space Mono",monospace}
+
+  /* nav */
+  nav{position:sticky;top:0;z-index:10;backdrop-filter:blur(10px);
+    background:rgba(8,8,12,.72);border-bottom:1px solid var(--line)}
+  nav .wrap{display:flex;align-items:center;justify-content:space-between;height:60px}
+  .brand{font-family:"Space Mono",monospace;font-weight:700;letter-spacing:.04em;
+    color:#fff;font-size:15px;display:flex;align-items:center;gap:10px}
+  .brand img{width:26px;height:26px;border-radius:6px}
+  .brand b{color:var(--cyan)}
+  .nav-links{display:flex;gap:22px;align-items:center;font-size:14px}
+  .nav-links a{color:var(--mut2)}
+  .nav-links a:hover{color:#fff;text-decoration:none}
+  .btn{display:inline-block;font-weight:600;border-radius:8px;padding:10px 18px;
+    border:1px solid var(--line);background:#1b1b28;color:#dfe6f0;transition:.15s}
+  .btn:hover{border-color:var(--cyan);color:#fff;text-decoration:none}
+  .btn-primary{border:none;color:#04161c;font-weight:700;
+    background:linear-gradient(180deg,#38f0ff,#00a8c8)}
+  .btn-primary:hover{filter:brightness(1.08)}
+
+  /* hero */
+  header{padding:84px 0 40px;text-align:center}
+  .kick{font-family:"Space Mono",monospace;font-weight:700;font-size:13px;
+    letter-spacing:.34em;color:var(--cyan);text-transform:uppercase;margin-bottom:22px}
+  h1{font-family:"Space Mono",monospace;font-weight:700;line-height:.98;
+    font-size:clamp(38px,8vw,84px);letter-spacing:-.01em;color:#fff;
+    text-shadow:.03em 0 rgba(255,45,126,.85),-.03em 0 rgba(0,229,255,.85)}
+  h1 .l2{color:var(--cyan);text-shadow:.03em 0 rgba(255,45,126,.8),-.03em 0 rgba(168,85,247,.8)}
+  .lede{max-width:620px;margin:26px auto 0;font-size:19px;color:var(--mut2)}
+  .lede b{color:#fff;font-weight:600}
+  .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:34px}
+  .shot{margin:54px auto 0;max-width:980px;border-radius:14px;overflow:hidden;
+    border:1px solid rgba(0,229,255,.35);
+    box-shadow:0 0 0 1px rgba(0,0,0,.4),0 30px 80px rgba(0,0,0,.6),0 0 90px rgba(255,45,126,.12)}
+  .shot img{display:block;width:100%}
+
+  /* sections */
+  section{padding:64px 0}
+  .eyebrow{font-family:"Space Mono",monospace;color:var(--mag);font-size:13px;
+    letter-spacing:.18em;text-transform:uppercase;margin-bottom:10px}
+  h2{font-size:clamp(26px,4vw,38px);color:#fff;line-height:1.1;letter-spacing:-.01em}
+  .sub{color:var(--mut2);max-width:640px;margin-top:12px;font-size:17px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+    gap:18px;margin-top:38px}
+  .feature{background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:22px 20px;transition:.15s}
+  .feature:hover{border-color:rgba(0,229,255,.5);transform:translateY(-2px)}
+  .feature h3{font-family:"Space Mono",monospace;font-size:16px;color:var(--cyan);
+    margin-bottom:8px;letter-spacing:.02em}
+  .feature p{color:var(--mut2);font-size:15px}
+
+  .gallery{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:38px}
+  .gallery figure{border-radius:12px;overflow:hidden;border:1px solid var(--line);
+    background:#000;position:relative}
+  .gallery img{display:block;width:100%}
+  .gallery figcaption{font-family:"Space Mono",monospace;font-size:12px;color:var(--mut2);
+    padding:10px 14px;border-top:1px solid var(--line);background:var(--panel)}
+  .gallery .wide{grid-column:1 / -1}
+  @media(max-width:680px){.gallery{grid-template-columns:1fr}}
+
+  .effects{display:flex;flex-wrap:wrap;gap:10px;margin-top:30px}
+  .tag{font-family:"Space Mono",monospace;font-size:13px;color:#bfeaff;
+    border:1px solid #1c4a56;background:#0c2a32;padding:7px 12px;border-radius:8px}
+
+  pre{background:#0a0a10;border:1px solid var(--line);border-radius:12px;
+    padding:20px 22px;overflow:auto;margin-top:24px;font-size:14px}
+  code{font-family:"Space Mono",monospace;color:#cfefff}
+  .req{color:var(--mut);font-size:14px;margin-top:18px}
+  .req code{color:var(--mut2);background:#13131c;padding:1px 6px;border-radius:5px}
+
+  footer{border-top:1px solid var(--line);padding:34px 0 60px;margin-top:40px;
+    color:var(--mut);font-size:14px}
+  footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <span class="brand"><img src="icon.png" alt="">Crazy Video <b>Glitch&nbsp;Editor</b></span>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#gallery">Gallery</a>
+      <a href="#run">Run</a>
+      <a class="btn" href="https://github.com/willbearfruits/videoglitchcrazynes">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header>
+  <div class="wrap">
+    <div class="kick">Desktop · ffmpeg + opencv · beat-synced</div>
+    <h1>CRAZY VIDEO<br><span class="l2">GLITCH EDITOR</span></h1>
+    <p class="lede">Take a clip, <b>destroy it on the beat.</b> Datamosh, channel
+      lobotomy, pixel-sort melt and frame-granular synthesis in a desktop editor
+      with a real ffmpeg/opencv render backend.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/willbearfruits/videoglitchcrazynes">View on GitHub</a>
+      <a class="btn" href="#run">How to run</a>
+    </div>
+    <div class="shot">
+      <img src="screenshots/editor.png" alt="The Crazy Video Glitch Editor with a datamosh chain running">
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <div class="eyebrow">What it does</div>
+    <h2>Glitch that listens to the music</h2>
+    <p class="sub">Every effect can fire on detected beats and react to the audio,
+      so a render is chopped, reordered and corrupted in time with the track —
+      not by hand.</p>
+    <div class="grid">
+      <div class="feature">
+        <h3>Beat sync</h3>
+        <p>librosa detects beats and onsets. Each effect runs always, as a
+          decaying pulse, or hard-gated for a hold time — optionally only every
+          Nth beat.</p>
+      </div>
+      <div class="feature">
+        <h3>Audio-reactive</h3>
+        <p>Map any effect to an audio band — rms, bass, mid, high. Bass drives
+          zoom punches, highs drive the RGB tear, loudness drives grain density.</p>
+      </div>
+      <div class="feature">
+        <h3>Real datamosh</h3>
+        <p>Frames are encoded to an mpeg4 AVI, then I-frames are stripped at the
+          byte level so motion vectors bloom over the wrong content. Not a shader
+          fake.</p>
+      </div>
+      <div class="feature">
+        <h3>Frame-granular synthesis</h3>
+        <p>Shatter a clip into a cloud of windowed frame grains. The same grain
+          schedule synthesizes matching granular audio, so picture and sound
+          granulate in lockstep.</p>
+      </div>
+      <div class="feature">
+        <h3>Layers &amp; time-warp</h3>
+        <p>Composite any number of layers with 16 blend modes. A beat-driven
+          time-warp freezes, ramps and reverses a layer's content against a
+          steady music bed.</p>
+      </div>
+      <div class="feature">
+        <h3>Auto-Lobotomizer</h3>
+        <p>One button generates the whole edit: a beat-driven time-remap plus an
+          audio-reactive glitch chain, datamosh on.</p>
+      </div>
+      <div class="feature">
+        <h3>GPU &amp; node graph</h3>
+        <p>moderngl fragment shaders, plus a node-graph mode with feedback loops
+          for video-feedback trails.</p>
+      </div>
+      <div class="feature">
+        <h3>Live performance</h3>
+        <p>Drive params with a gamepad or MIDI, add a webcam or screen layer, and
+          stream the glitch composite to a virtual webcam.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="gallery">
+  <div class="wrap">
+    <div class="eyebrow">Gallery</div>
+    <h2>Real output, real UI</h2>
+    <p class="sub">Everything below is rendered by the engine — no mockups.</p>
+    <div class="gallery">
+      <figure>
+        <img src="screenshots/editor-pixelmelt.png" alt="Pixel-sort melt preset in the editor">
+        <figcaption>pixel-sort melt</figcaption>
+      </figure>
+      <figure>
+        <img src="screenshots/editor-lobotomy.png" alt="Auto-Lobotomizer output in the editor">
+        <figcaption>auto-lobotomizer — time-warp + glitch chain</figcaption>
+      </figure>
+      <figure class="wide">
+        <img src="screenshots/effects-gallery.png" alt="A test pattern run through several effects">
+        <figcaption>one test pattern through original · rgb-shift · lobotomy · pixel-sort · slice · warp</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section id="effects">
+  <div class="wrap">
+    <div class="eyebrow">The kit</div>
+    <h2>16 effects, 6 presets</h2>
+    <div class="effects">
+      <span class="tag">RGB Shift</span>
+      <span class="tag">Channel Lobotomy</span>
+      <span class="tag">Camera Shake</span>
+      <span class="tag">Zoom Punch</span>
+      <span class="tag">Stutter / Freeze</span>
+      <span class="tag">Frame Shuffle</span>
+      <span class="tag">Echo / Trails</span>
+      <span class="tag">Pixel Sort</span>
+      <span class="tag">Slice Displace</span>
+      <span class="tag">Wave Warp</span>
+      <span class="tag">Strobe / Invert</span>
+      <span class="tag">Databend (JPEG)</span>
+      <span class="tag">VHS / Decay</span>
+      <span class="tag">Optical Datamosh</span>
+      <span class="tag">Flow Smear</span>
+      <span class="tag">Depth Displace</span>
+    </div>
+  </div>
+</section>
+
+<section id="run">
+  <div class="wrap">
+    <div class="eyebrow">Run it</div>
+    <h2>Clone and go</h2>
+    <p class="sub">Python + PySide6. The engine is headless and scriptable; the
+      GUI is a thin layer on top.</p>
+    <pre><code>git clone https://github.com/willbearfruits/videoglitchcrazynes
+cd videoglitchcrazynes
+pip install -r requirements.txt
+./run.sh                      # or: python3 main.py
+
+# batch render from the command line (no GUI):
+python3 main.py in.mp4 out.mp4 --preset brainfuck --datamosh --speed 1.5</code></pre>
+    <p class="req">Requires <code>ffmpeg</code> + <code>ffprobe</code> on PATH.
+      Encoding uses <code>h264_nvenc</code> (NVIDIA) and falls back to
+      <code>libx264</code>. Optional: <code>torch</code> for MiDaS depth,
+      <code>portaudio</code> for live audio, <code>v4l2loopback</code> for the
+      virtual cam.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>MIT License · © 2026 willbearfruits</span>
+    <span><a href="https://github.com/willbearfruits/videoglitchcrazynes">github.com/willbearfruits/videoglitchcrazynes</a></span>
+  </div>
+</footer>
+
+</body>
+</html>
