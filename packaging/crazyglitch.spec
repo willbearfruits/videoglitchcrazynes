@@ -8,14 +8,22 @@ import sys
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 APP = "CrazyVideoGlitchEditor"
-ROOT = os.path.abspath(os.getcwd())
+# PyInstaller resolves a spec's relative script paths against the spec's own
+# directory, so anchor everything to the repo root (the spec lives in packaging/).
+try:
+    ROOT = os.path.dirname(SPECPATH)          # SPECPATH = dir holding this spec
+except NameError:
+    ROOT = os.path.abspath(os.getcwd())
 
 datas, binaries, hiddenimports = [], [], []
 
 # Lazy-loaded / data-bearing packages PyInstaller's static scan tends to miss.
-for pkg in ("librosa", "numba", "llvmlite", "sklearn", "scipy", "soundfile",
-            "soxr", "pooch", "lazy_loader", "audioread", "joblib", "decorator",
-            "msgpack", "sounddevice", "pygame", "moderngl", "glcontext"):
+# numpy is collected wholesale: librosa/scipy lazily import numpy.f2py and
+# numpy.core.* submodules the default numpy hook leaves out.
+for pkg in ("numpy", "librosa", "numba", "llvmlite", "sklearn", "scipy",
+            "soundfile", "soxr", "pooch", "lazy_loader", "audioread", "joblib",
+            "decorator", "msgpack", "sounddevice", "pygame", "moderngl",
+            "glcontext"):
     try:
         d, b, h = collect_all(pkg)
         datas += d
@@ -37,7 +45,7 @@ if os.path.isdir(binroot):
 icon = os.environ.get("CRAZYGLITCH_ICON") or None
 
 a = Analysis(
-    ["main.py"],
+    [os.path.join(ROOT, "main.py")],
     pathex=[ROOT],
     binaries=binaries,
     datas=datas,
