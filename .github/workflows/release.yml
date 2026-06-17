@@ -18,10 +18,12 @@ jobs:
         include:
           - os: ubuntu-22.04
             platform: linux
-          - os: windows-latest
-            platform: windows
-          - os: macos-13          # Intel — runs on Apple Silicon via Rosetta too
-            platform: macos
+          # Windows/macOS are built off-CI for now (see packaging/BUILD.md).
+          # Re-enable here by uncommenting:
+          # - os: windows-latest
+          #   platform: windows
+          # - os: macos-13          # Intel — runs on Apple Silicon via Rosetta too
+          #   platform: macos
     steps:
       - uses: actions/checkout@v4
 
