@@ -109,6 +109,22 @@
   .gallery .wide{grid-column:1 / -1}
   @media(max-width:680px){.gallery{grid-template-columns:1fr}}
 
+  /* download */
+  .dls{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:38px}
+  @media(max-width:680px){.dls{grid-template-columns:1fr}}
+  .dl{display:flex;flex-direction:column;background:var(--card);
+    border:1px solid var(--line);border-radius:14px;padding:24px 22px;transition:.15s}
+  .dl:hover{border-color:rgba(0,229,255,.55);transform:translateY(-3px);text-decoration:none}
+  .dl .os{font-family:"Space Mono",monospace;font-size:18px;color:#fff;font-weight:700}
+  .dl .fmt{font-family:"Space Mono",monospace;font-size:12px;color:var(--mut);
+    margin-top:4px;letter-spacing:.04em}
+  .dl .go{margin-top:18px;font-weight:700;color:#04161c;text-align:center;
+    background:linear-gradient(180deg,#38f0ff,#00a8c8);border-radius:8px;padding:10px}
+  .dl .note{margin-top:14px;font-size:13px;color:var(--mut2);line-height:1.45}
+  .dlfoot{margin-top:22px;color:var(--mut);font-size:14px}
+  .dlfoot code{background:#13131c;color:var(--mut2);padding:1px 6px;border-radius:5px;
+    font-family:"Space Mono",monospace}
+
   .effects{display:flex;flex-wrap:wrap;gap:10px;margin-top:30px}
   .tag{font-family:"Space Mono",monospace;font-size:13px;color:#bfeaff;
     border:1px solid #1c4a56;background:#0c2a32;padding:7px 12px;border-radius:8px}
@@ -130,9 +146,9 @@
   <div class="wrap">
     <span class="brand"><img src="icon.png" alt="">Crazy Video <b>Glitch&nbsp;Editor</b></span>
     <div class="nav-links">
+      <a href="#download">Download</a>
       <a href="#features">Features</a>
       <a href="#gallery">Gallery</a>
-      <a href="#run">Run</a>
       <a class="btn" href="https://github.com/willbearfruits/videoglitchcrazynes">GitHub</a>
     </div>
   </div>
@@ -146,14 +162,50 @@
       lobotomy, pixel-sort melt and frame-granular synthesis in a desktop editor
       with a real ffmpeg/opencv render backend.</p>
     <div class="cta">
-      <a class="btn btn-primary" href="https://github.com/willbearfruits/videoglitchcrazynes">View on GitHub</a>
-      <a class="btn" href="#run">How to run</a>
+      <a class="btn btn-primary" href="#download">Download</a>
+      <a class="btn" href="https://github.com/willbearfruits/videoglitchcrazynes">View on GitHub</a>
     </div>
     <div class="shot">
       <img src="screenshots/editor.png" alt="The Crazy Video Glitch Editor with a datamosh chain running">
     </div>
   </div>
 </header>
+
+<section id="download">
+  <div class="wrap">
+    <div class="eyebrow">Download</div>
+    <h2>Get the app</h2>
+    <p class="sub">Prebuilt for Linux, Windows and macOS — ffmpeg is bundled, so
+      there's nothing else to install. Built automatically from source on every
+      release.</p>
+    <div class="dls">
+      <a class="dl" href="https://github.com/willbearfruits/videoglitchcrazynes/releases/latest/download/CrazyVideoGlitchEditor-linux-x86_64.AppImage">
+        <span class="os">Linux</span>
+        <span class="fmt">AppImage · x86_64</span>
+        <span class="go">Download</span>
+        <span class="note">Make it executable and run:
+          <br><code>chmod +x *.AppImage &amp;&amp; ./*.AppImage</code></span>
+      </a>
+      <a class="dl" href="https://github.com/willbearfruits/videoglitchcrazynes/releases/latest/download/CrazyVideoGlitchEditor-windows-x64.zip">
+        <span class="os">Windows</span>
+        <span class="fmt">ZIP · x64</span>
+        <span class="go">Download</span>
+        <span class="note">Unzip, then run
+          <code>CrazyVideoGlitchEditor.exe</code>.</span>
+      </a>
+      <a class="dl" href="https://github.com/willbearfruits/videoglitchcrazynes/releases/latest/download/CrazyVideoGlitchEditor-macos.zip">
+        <span class="os">macOS</span>
+        <span class="fmt">ZIP · Intel / Apple&nbsp;Silicon</span>
+        <span class="go">Download</span>
+        <span class="note">Unsigned: first launch is right-click &rarr; Open
+          (or <code>xattr -dr com.apple.quarantine</code>).</span>
+      </a>
+    </div>
+    <p class="dlfoot">No prebuilt binary for your system?
+      <a href="#run">Run it from source</a> — it's a few commands. All releases
+      live on the <a href="https://github.com/willbearfruits/videoglitchcrazynes/releases">releases page</a>.</p>
+  </div>
+</section>
 
 <section id="features">
   <div class="wrap">

@@ -1,16 +1,46 @@
 """Media helpers: probe, audio extract, and ffmpeg frame-pipe encode/mux."""
 from __future__ import annotations
 import json
+import os
+import sys
+import shutil
 import functools
 import subprocess
 from dataclasses import dataclass
+
+
+def _resolve_bin(name: str) -> str:
+    """Locate ffmpeg/ffprobe. Prefer a binary bundled with a frozen build
+    (download-and-run apps), then a sibling ``bin/`` dir, then PATH (source
+    runs). Override with ``CRAZYGLITCH_FFMPEG`` / ``CRAZYGLITCH_FFPROBE``."""
+    exe = name + (".exe" if sys.platform.startswith("win") else "")
+    override = os.environ.get("CRAZYGLITCH_" + name.upper())
+    if override and os.path.isfile(override):
+        return override
+    roots = []
+    if getattr(sys, "frozen", False):          # PyInstaller / AppImage bundle
+        roots.append(os.path.dirname(sys.executable))
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            roots.append(meipass)
+    roots.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    for r in roots:
+        for d in (r, os.path.join(r, "bin")):
+            p = os.path.join(d, exe)
+            if os.path.isfile(p):
+                return p
+    return shutil.which(exe) or name
+
+
+FFMPEG = _resolve_bin("ffmpeg")
+FFPROBE = _resolve_bin("ffprobe")
 
 
 @functools.lru_cache(maxsize=1)
 def has_nvenc() -> bool:
     """True if this ffmpeg build advertises the h264_nvenc encoder."""
     try:
-        out = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
+        out = subprocess.run([FFMPEG, "-hide_banner", "-encoders"],
                              capture_output=True, text=True).stdout
         return "h264_nvenc" in out
     except Exception:
@@ -28,7 +58,7 @@ class MediaInfo:
 
 
 def probe(path: str) -> MediaInfo:
-    cmd = ["ffprobe", "-v", "error", "-print_format", "json",
+    cmd = [FFPROBE, "-v", "error", "-print_format", "json",
            "-show_streams", "-show_format", path]
     out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
     data = json.loads(out)
@@ -50,7 +80,7 @@ def extract_audio(path: str, out_wav: str) -> bool:
     """Extract audio to a wav for beat analysis. False if no audio."""
     try:
         subprocess.run(
-            ["ffmpeg", "-y", "-i", path, "-vn", "-ac", "1", "-ar", "22050", out_wav],
+            [FFMPEG, "-y", "-i", path, "-vn", "-ac", "1", "-ar", "22050", out_wav],
             capture_output=True, check=True)
         return True
     except subprocess.CalledProcessError:
@@ -78,7 +108,7 @@ def open_frame_writer(out_path: str, w: int, h: int, fps: float,
     datamosh -> mpeg4 AVI with one big GOP and no B-frames (mosh-friendly).
     otherwise -> h264 (nvenc if available) mp4.
     """
-    base = ["ffmpeg", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
+    base = [FFMPEG, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
             "-s", f"{w}x{h}", "-r", f"{fps}", "-i", "-", "-an"]
     if datamosh:
         # recurring I-frames (~1/sec) give the P-frame bloom something to strip;
@@ -113,11 +143,11 @@ def finalize(video_in: str, audio_src: str | None, out_path: str,
         fc = (f"[0:v] fps={fps},{scale},split [a][b];"
               f"[a] palettegen=stats_mode=diff [p];"
               f"[b][p] paletteuse=dither=bayer")
-        subprocess.run(["ffmpeg", "-y", "-i", video_in, "-filter_complex", fc,
+        subprocess.run([FFMPEG, "-y", "-i", video_in, "-filter_complex", fc,
                         "-an", out_path], capture_output=True, check=True)
         return
 
-    cmd = ["ffmpeg", "-y", "-i", video_in]
+    cmd = [FFMPEG, "-y", "-i", video_in]
     has_audio = bool(audio_src)
     if has_audio:
         cmd += ["-i", audio_src]

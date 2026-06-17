@@ -26,7 +26,23 @@ directly, with no GUI in the loop.
 
 ![A test pattern through several effects](docs/screenshots/effects-gallery.png)
 
-## Run
+## Download
+
+Prebuilt, ffmpeg-bundled binaries are on the
+[releases page](https://github.com/willbearfruits/videoglitchcrazynes/releases/latest)
+— nothing else to install:
+
+| Platform | File | First run |
+|---|---|---|
+| Linux | `CrazyVideoGlitchEditor-linux-x86_64.AppImage` | `chmod +x *.AppImage && ./*.AppImage` |
+| Windows | `CrazyVideoGlitchEditor-windows-x64.zip` | unzip, run `CrazyVideoGlitchEditor.exe` |
+| macOS | `CrazyVideoGlitchEditor-macos.zip` | unzip; unsigned, so right-click → Open |
+
+The editor is cross-platform. Two features are Linux-only as built: webcam
+capture (`/dev/video*`) and the PipeWire audio path; the "Go Live" virtual cam
+needs OBS on Windows/macOS. Everything else works everywhere.
+
+## Run from source
 
 ```bash
 pip install -r requirements.txt

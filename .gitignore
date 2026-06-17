@@ -20,3 +20,12 @@ env/
 # editor lock files
 .~lock.*#
 assets/crazyglitch.desktop
+
+# packaging / build artifacts
+/build/
+/dist/
+/AppDir/
+*.AppImage
+packaging/bin/
+packaging/icon.ico
+packaging/icon.icns
